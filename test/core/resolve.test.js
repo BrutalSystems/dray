@@ -19,3 +19,22 @@ test('resolveTargets repo:name builds unit with stamp + repoUri + _secrets', () 
   assert.deepEqual(u.dependsOn, ['secret:sai-secrets']);
   assert.deepEqual(u._secrets, [{ name: 'sai-secrets', kind: 'sops-manifest', file: 's.enc.yaml' }]);
 });
+
+const regWithDisabled = { sai: { path: '/x/sai', config: {
+  name: 'sai',
+  images: [
+    { name: 'aws-cost', ecr: 'aws-cost', source: { local: true } },
+    { name: 'chat-service', ecr: 'chat-service', source: { local: true } },
+  ],
+  workloads: [
+    { name: 'aws-cost', kind: 'deployment', image: 'aws-cost', manifests: ['a'], disabled: true },
+    { name: 'chat-service', kind: 'deployment', image: 'chat-service', manifests: ['b'] },
+  ],
+} } };
+test('resolveTargets skips disabled workloads for bare repo', () => {
+  const units = resolveTargets({ registry: regWithDisabled, globalDefaults, spec: 'sai' });
+  assert.deepEqual(units.map((u) => u.workload), ['chat-service']);
+});
+test('explicitly targeting a disabled workload errors', () => {
+  assert.throws(() => resolveTargets({ registry: regWithDisabled, globalDefaults, spec: 'sai:aws-cost' }), /disabled/);
+});

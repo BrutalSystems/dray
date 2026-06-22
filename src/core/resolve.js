@@ -26,7 +26,18 @@ function unitsForRepo(name, entry, globalDefaults, filter) {
     });
   };
   const want = (w) => !filter || w.name === filter || w.image === filter;
-  for (const w of workloads) if (want(w)) mk(images.get(w.image), w);
+  for (const w of workloads) {
+    if (!want(w)) continue;
+    if (w.disabled) {
+      // Documented in config but not deployed by dray (e.g. endpoints served
+      // elsewhere). Skip in bare-repo/--all; error if explicitly targeted by name.
+      if (filter && w.name === filter) {
+        throw new Error(`workload "${w.name}" is disabled in ${name}'s .dray/config.json`);
+      }
+      continue;
+    }
+    mk(images.get(w.image), w);
+  }
   for (const img of images.values()) {
     const matches = !filter || img.name === filter;
     const hasWorkload = workloads.some((w) => w.image === img.name);
