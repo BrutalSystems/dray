@@ -1,0 +1,9 @@
+{
+  "name": "@brutalsystems/dray",
+  "version": "0.1.0",
+  "description": "Convention-driven multi-repo deploy orchestrator",
+  "bin": { "dray": "bin/dray.js" },
+  "scripts": { "test": "node --test" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "commander": "^12.0.0" }
+}
