@@ -24,6 +24,13 @@ test('cronjob unit gets apply but no rollout', () => {
   const kinds = planFor([unit('aigateway-cost', 'rollup', 'cronjob')], 'ship').map((s) => s.kind);
   assert.ok(kinds.includes('apply')); assert.ok(!kinds.includes('rollout'));
 });
+test('no-image workload: apply + rollout, no build/push', () => {
+  const unit = { repo: 'sai', image: null, workload: 'searxng', kind: 'deployment', manifests: ['.k8s/searxng/deployment.yaml'], dependsOn: [], _secrets: [] };
+  const kinds = planFor([unit], 'ship').map((s) => s.kind);
+  assert.ok(!kinds.includes('build') && !kinds.includes('push'), 'no build/push for image-less workload');
+  assert.ok(kinds.includes('apply') && kinds.includes('rollout'), 'apply + rollout present');
+});
+
 test('build dedups shared image across workloads', () => {
   const units = [unit('sai-worker', 'sai-api'), unit('sai-worker', 'sai-api-warmworker')];
   assert.deepEqual(planFor(units, 'build').map((s) => s.kind), ['deps', 'build']);

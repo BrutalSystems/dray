@@ -38,3 +38,16 @@ test('resolveTargets skips disabled workloads for bare repo', () => {
 test('explicitly targeting a disabled workload errors', () => {
   assert.throws(() => resolveTargets({ registry: regWithDisabled, globalDefaults, spec: 'sai:aws-cost' }), /disabled/);
 });
+
+const regNoImage = { sai: { path: '/x/sai', config: {
+  name: 'sai',
+  images: [],
+  workloads: [{ name: 'searxng', kind: 'deployment', manifests: ['.k8s/searxng/deployment.yaml', '.k8s/searxng/configmap.yaml'] }],
+} } };
+test('workload with no image → apply-only unit (image null, empty stamp)', () => {
+  const [u] = resolveTargets({ registry: regNoImage, globalDefaults, spec: 'sai:searxng' });
+  assert.equal(u.image, null);
+  assert.equal(u.repoUri, null);
+  assert.deepEqual(u.stamp, []);
+  assert.deepEqual(u.manifests, ['.k8s/searxng/deployment.yaml', '.k8s/searxng/configmap.yaml']);
+});

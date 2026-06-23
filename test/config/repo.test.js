@@ -8,6 +8,10 @@ const valid = {
   secrets: [{ name: 'sai-secrets', kind: 'sops-manifest', file: '.k8s/marketing/sai-secrets.enc.yaml' }],
 };
 test('accepts a valid config', () => { assert.equal(validateRepoConfig(valid).name, 'sai'); });
+test('accepts a workload with no image (apply-only)', () => {
+  const cfg = { name: 'sai', images: [], workloads: [{ name: 'searxng', kind: 'deployment', manifests: ['a'] }] };
+  assert.equal(validateRepoConfig(cfg).name, 'sai');
+});
 test('rejects workload referencing unknown image', () => {
   const bad = { ...valid, workloads: [{ name: 'x', kind: 'deployment', image: 'nope', manifests: ['a'] }] };
   assert.throws(() => validateRepoConfig(bad), /unknown image "nope"/);

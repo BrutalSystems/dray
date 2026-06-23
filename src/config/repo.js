@@ -19,7 +19,7 @@ function validateRepoConfig(cfg) {
   for (const w of cfg.workloads || []) {
     if (!w.name) e.push('workload missing name');
     if (!WORKLOAD_KINDS.has(w.kind)) e.push(`workload "${w.name}" kind must be deployment|cronjob`);
-    if (!imageNames.has(w.image)) e.push(`workload "${w.name}" references unknown image "${w.image}"`);
+    if (w.image !== undefined && !imageNames.has(w.image)) e.push(`workload "${w.name}" references unknown image "${w.image}"`);
     if (!Array.isArray(w.manifests) || w.manifests.length === 0) e.push(`workload "${w.name}" needs a non-empty manifests list`);
   }
   for (const s of cfg.secrets || []) {

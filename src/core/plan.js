@@ -1,6 +1,10 @@
 function uniqueImages(units) {
   const seen = new Map();
-  for (const u of units) { const key = `${u.repo}/${u.image.name}`; if (!seen.has(key)) seen.set(key, u); }
+  for (const u of units) {
+    if (!u.image) continue; // apply-only workload (no image to build/push)
+    const key = `${u.repo}/${u.image.name}`;
+    if (!seen.has(key)) seen.set(key, u);
+  }
   return [...seen.values()];
 }
 const buildSteps = (u) => {

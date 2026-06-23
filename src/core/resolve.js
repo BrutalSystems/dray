@@ -15,13 +15,15 @@ function unitsForRepo(name, entry, globalDefaults, filter) {
   const units = [];
   const mk = (image, w) => {
     const defaults = mergeDefaults(globalDefaults, cfg, w || {});
-    const stampNames = (w && w.stampImages) || [image.name];
+    // A workload may have no image (apply-only, e.g. a third-party image that
+    // lives literally in the manifest) — then there's nothing to build or stamp.
+    const stampNames = (w && w.stampImages) || (image ? [image.name] : []);
     const stamp = stampNames.map((n) => ({ var: imageVar(images.get(n)), repoUri: ecrRepoUri(defaults, images.get(n)) }));
     units.push({
-      repo: name, repoPath: entry.path, image,
+      repo: name, repoPath: entry.path, image: image || null,
       workload: w ? w.name : null, kind: w ? w.kind : null,
       manifests: w ? w.manifests : [], dependsOn: (w && w.dependsOn) || [],
-      defaults, repoUri: ecrRepoUri(defaults, image), stamp,
+      defaults, repoUri: image ? ecrRepoUri(defaults, image) : null, stamp,
       _secrets: cfg.secrets || [],
     });
   };

@@ -5,6 +5,7 @@ const real = {
   render: require('./render'), depsCache: require('./depsCache'),
 };
 async function shaForUnit(u, d, cache, dryRun, allowDirty) {
+  if (!u.image) return null; // apply-only workload: no image, no sha/build
   const key = `${u.repo}/${u.image.name}`;
   if (cache.has(key)) return cache.get(key);
   let sha;
