@@ -1,13 +1,30 @@
 {
   "name": "@brutalsystems/dray",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Convention-driven multi-repo deploy orchestrator (forge for shipping)",
-  "bin": { "dray": "bin/dray.js" },
-  "files": ["bin", "src", "README.md"],
-  "scripts": { "test": "node --test" },
-  "engines": { "node": ">=20" },
-  "publishConfig": { "access": "public" },
+  "bin": {
+    "dray": "bin/dray.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "UNLICENSED",
-  "repository": { "type": "git", "url": "git+https://github.com/BrutalSystems/dray.git" },
-  "dependencies": { "commander": "^12.0.0" }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BrutalSystems/dray.git"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  }
 }
