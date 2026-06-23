@@ -11,6 +11,11 @@ test('buildImage passes build args', async () => {
   assert.ok(a.join(' ').includes('--build-arg VITE_A=1'));
   assert.ok(a.join(' ').includes('--build-arg VITE_B=two'));
 });
+test('buildImage disables provenance attestations (EKS pulls single-arch images)', async () => {
+  let a; docker._withRun(async (c, args) => { a = args; return { code: 0 }; });
+  await docker.buildImage({ ecrUri: 'r/w', sha: 's', dockerfile: 'D', context: '.', platform: 'linux/arm64', cwd: '/x' });
+  assert.ok(a.join(' ').includes('--provenance=false'));
+});
 
 test('pushImage pushes sha tag', async () => {
   let a; docker._withRun(async (c, args) => { a = args; return { code: 0 }; });

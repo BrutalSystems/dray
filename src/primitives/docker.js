@@ -1,6 +1,6 @@
 let _run = require('./exec').run; function _withRun(fn) { _run = fn; }
 function buildImage({ ecrUri, sha, dockerfile, context, platform, cwd, dryRun, buildArgs = [] }) {
-  const args = ['buildx', 'build', '--platform', platform, '-f', dockerfile, '-t', `${ecrUri}:${sha}`];
+  const args = ['buildx', 'build', '--platform', platform, '--provenance=false', '-f', dockerfile, '-t', `${ecrUri}:${sha}`];
   args.push('--build-arg', `GIT_SHA=${sha}`);
   for (const a of buildArgs) args.push('--build-arg', a);
   args.push('--load', context);
