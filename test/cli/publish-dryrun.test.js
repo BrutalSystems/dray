@@ -22,7 +22,7 @@ function setup() {
 test('publish <repo>:<pilet> --dry-run substitutes {name} and wraps in sops', () => {
   const { bin, env } = setup();
   const out = execFileSync('node', [bin, 'publish', 'web:presence', '--dry-run'], { env, encoding: 'utf8' });
-  assert.match(out, /sops exec-env secrets\.env -- npm run publish:feed -- --pilet presence/);
+  assert.match(out, /sops exec-env secrets\.env npm run publish:feed -- --pilet presence/);
   assert.ok(!out.includes('{name}'));
 });
 
