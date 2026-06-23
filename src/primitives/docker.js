@@ -1,6 +1,9 @@
 let _run = require('./exec').run; function _withRun(fn) { _run = fn; }
-function buildImage({ ecrUri, sha, dockerfile, context, platform, cwd, dryRun }) {
-  return _run('docker', ['buildx', 'build', '--platform', platform, '-f', dockerfile, '-t', `${ecrUri}:${sha}`, '--load', context], { cwd, dryRun });
+function buildImage({ ecrUri, sha, dockerfile, context, platform, cwd, dryRun, buildArgs = [] }) {
+  const args = ['buildx', 'build', '--platform', platform, '-f', dockerfile, '-t', `${ecrUri}:${sha}`];
+  for (const a of buildArgs) args.push('--build-arg', a);
+  args.push('--load', context);
+  return _run('docker', args, { cwd, dryRun });
 }
 function pushImage({ ecrUri, sha, dryRun }) { return _run('docker', ['push', `${ecrUri}:${sha}`], { dryRun }); }
 function buildDeps(image, cwd, dryRun) {

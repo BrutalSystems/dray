@@ -5,6 +5,13 @@ test('buildImage tags sha and loads', async () => {
   await docker.buildImage({ ecrUri: 'r/agent', sha: 'abc', dockerfile: 'D', context: '.', platform: 'linux/arm64', cwd: '/x' });
   assert.ok(a.includes('r/agent:abc') && a.includes('--platform') && a.includes('linux/arm64') && a.includes('--load'));
 });
+test('buildImage passes build args', async () => {
+  let a; docker._withRun(async (c, args) => { a = args; return { code: 0 }; });
+  await docker.buildImage({ ecrUri: 'r/w', sha: 's', dockerfile: 'D', context: '.', platform: 'p', cwd: '/x', buildArgs: ['VITE_A=1', 'VITE_B=two'] });
+  assert.ok(a.join(' ').includes('--build-arg VITE_A=1'));
+  assert.ok(a.join(' ').includes('--build-arg VITE_B=two'));
+});
+
 test('pushImage pushes sha tag', async () => {
   let a; docker._withRun(async (c, args) => { a = args; return { code: 0 }; });
   await docker.pushImage({ ecrUri: 'r/agent', sha: 'abc' });
