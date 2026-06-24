@@ -1,6 +1,6 @@
 {
   "name": "@brutalsystems/dray",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Convention-driven multi-repo deploy orchestrator (forge for shipping)",
   "bin": {
     "dray": "bin/dray.js"
