@@ -57,7 +57,9 @@ Global flags: `--dry-run` (print the plan, run nothing), `--allow-dirty`
       "dockerfile": "Dockerfile", "context": ".",
       // optional: rebuild a cached deps layer when lockfiles change
       "depsImage": { "dockerfile": "Dockerfile.deps", "tag": "app:deps", "rebuildOn": ["uv.lock"] },
-      // optional: inject --build-arg from an env file (e.g. VITE_* from .env.production)
+      // optional: inject --build-arg from an env file (e.g. VITE_* from .env.production),
+      // or from a sops-encrypted file decrypted in memory at build time (no plaintext on disk):
+      //   "buildArgs": { "sopsEnvFile": "secrets.env", "prefix": "VITE_" }
       "buildArgs": { "envFile": ".env.production", "prefix": "VITE_" } },
     // image from another repo (cloned to a tmp dir, built, pushed):
     { "name": "svc", "ecr": "svc", "source": { "git": "https://github.com/org/svc", "ref": "main" } }

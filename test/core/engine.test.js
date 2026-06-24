@@ -29,6 +29,15 @@ test('secret step syncs the carried secret object with the unit namespace', asyn
   await execute([step], { deps: d });
   assert.deepEqual(log, ['secret:sai-secrets:s.enc.yaml:marketing']);
 });
+test('build awaits resolveBuildArgs and forwards the resolved args to buildImage', async () => {
+  const log = []; const d = deps(log);
+  let received;
+  d.docker.buildImage = async ({ sha, buildArgs }) => { received = buildArgs; log.push(`build:${sha}`); };
+  d.buildArgs = { resolveBuildArgs: async () => ['VITE_X=1'] };
+  const unit = { repo: 'sai', repoPath: '/x', image: { name: 'app', source: { local: true } }, defaults: {}, stamp: [] };
+  await execute([{ kind: 'build', unit }], { deps: d });
+  assert.deepEqual(received, ['VITE_X=1']);
+});
 test('dirty local tree throws unless allowDirty', async () => {
   const d = deps([]); d.git.isDirty = async () => true;
   const unit = { repo: 'sai', repoPath: '/x', image: { name: 'a', source: { local: true } }, defaults: {}, stamp: [] };

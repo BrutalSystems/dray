@@ -39,7 +39,7 @@ async function execute(steps, { dryRun = false, allowDirty = false, deps } = {})
       if (u._clone && !clones.includes(u._clone)) clones.push(u._clone);
       const cwd = u._clone ? u._clone.dir : u.repoPath;
       if (step.kind === 'deps') { if (d.depsCache.needsDepsRebuild(u.image, cwd, u.repo)) await d.docker.buildDeps(u.image, cwd, dryRun); }
-      else if (step.kind === 'build') await d.docker.buildImage({ ecrUri: u.repoUri, sha, dockerfile: u.image.dockerfile, context: u.image.context || '.', platform: u.defaults.platform, cwd, dryRun, buildArgs: d.buildArgs.resolveBuildArgs(u.image, cwd) });
+      else if (step.kind === 'build') await d.docker.buildImage({ ecrUri: u.repoUri, sha, dockerfile: u.image.dockerfile, context: u.image.context || '.', platform: u.defaults.platform, cwd, dryRun, buildArgs: await d.buildArgs.resolveBuildArgs(u.image, cwd, { dryRun }) });
       else if (step.kind === 'push') {
         if (!loggedIn) { await d.docker.ecrLogin({ account: u.defaults.account, region: u.defaults.region, profile: u.defaults.profile, dryRun }); await d.docker.ensureRepo({ ecr: u.image.ecr, account: u.defaults.account, region: u.defaults.region, profile: u.defaults.profile, dryRun }); loggedIn = true; }
         await d.docker.pushImage({ ecrUri: u.repoUri, sha, dryRun });
