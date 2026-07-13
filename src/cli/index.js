@@ -3,6 +3,7 @@ async function run(argv) {
   if (argv.length <= 2) { await require('./menu').menu(); return; }
   const program = new Command();
   program.name('dray').description('Convention-driven multi-repo deploy orchestrator');
+  program.version(require('../../package.json').version, '-v, --version', 'show dray version');
   program.option('--dry-run', 'print planned commands, run nothing');
   program.option('--allow-dirty', 'allow building from a dirty tree (tags :<sha>-dirty)');
   for (const c of ['version', 'init', 'add', 'remove', 'reload', 'list',
