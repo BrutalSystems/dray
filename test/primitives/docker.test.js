@@ -22,6 +22,20 @@ test('pushImage pushes sha tag', async () => {
   await docker.pushImage({ ecrUri: 'r/agent', sha: 'abc' });
   assert.deepEqual(a, ['push', 'r/agent:abc']);
 });
+test('pushImage also tags + pushes :latest when latest is set', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push([c, ...args]); return { code: 0 }; });
+  await docker.pushImage({ ecrUri: 'r/agent', sha: 'abc', latest: true });
+  assert.deepEqual(calls, [
+    ['docker', 'push', 'r/agent:abc'],
+    ['docker', 'tag', 'r/agent:abc', 'r/agent:latest'],
+    ['docker', 'push', 'r/agent:latest'],
+  ]);
+});
+test('pushImage never moves :latest onto a dirty build', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push([c, ...args]); return { code: 0 }; });
+  await docker.pushImage({ ecrUri: 'r/agent', sha: 'abc-dirty', latest: true });
+  assert.deepEqual(calls, [['docker', 'push', 'r/agent:abc-dirty']]);
+});
 test('buildImage injects GIT_SHA build arg from the sha', async () => {
   let a; docker._withRun(async (c, args) => { a = args; return { code: 0 }; });
   await docker.buildImage({ ecrUri: 'r/w', sha: 'abc123', dockerfile: 'D', context: '.', platform: 'linux/arm64', cwd: '/x' });

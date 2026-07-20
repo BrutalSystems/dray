@@ -60,7 +60,11 @@ Global flags: `--dry-run` (print the plan, run nothing), `--allow-dirty`
       // optional: inject --build-arg from an env file (e.g. VITE_* from .env.production),
       // or from a sops-encrypted file decrypted in memory at build time (no plaintext on disk):
       //   "buildArgs": { "sopsEnvFile": "secrets.env", "prefix": "VITE_" }
-      "buildArgs": { "envFile": ".env.production", "prefix": "VITE_" } },
+      "buildArgs": { "envFile": ".env.production", "prefix": "VITE_" },
+      // optional: also move a mutable <ecr>:latest tag onto every (non-dirty)
+      // push, so workloads that reference <ecr>:latest track the newest build
+      // without being re-shipped (e.g. rarely-shipped cronjobs sharing an image).
+      "latest": true },
     // image from another repo (cloned to a tmp dir, built, pushed):
     { "name": "svc", "ecr": "svc", "source": { "git": "https://github.com/org/svc", "ref": "main" } }
   ],
@@ -91,3 +95,12 @@ Manifests reference managed images by a placeholder var — `${APP_IMAGE}`
 substitutes `<ecr>:<gitSHA>` for that var across the listed files (container
 image, env-var image refs, cronjob images — uniformly). A raw `kubectl apply`
 of an unrendered manifest fails loud, so applies always go through dray.
+
+An image with `"latest": true` additionally gets a mutable `<ecr>:latest` tag
+moved onto each non-dirty push. This is for the opposite need: a workload that
+should track the newest build of a shared image *without* being re-shipped
+(e.g. a low-frequency cronjob sharing an image with a frequently-shipped
+service). Reference `<ecr>:latest` literally in that manifest (with
+`imagePullPolicy: Always`) instead of the `${..._IMAGE}` placeholder. You trade
+away per-commit reproducibility/rollback for that workload — use it only where
+that's the point.

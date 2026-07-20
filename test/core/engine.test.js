@@ -19,6 +19,16 @@ test('build+push+apply+rollout with computed sha and rendered vars', async () =>
   await execute(steps, { deps: deps(log) });
   assert.deepEqual(log, ['build:abc', 'login', 'ensure', 'push:abc', 'render:{"AGENT_IMAGE":"r/agent:abc"}', 'apply:/r/d.yaml', 'roll:agent']);
 });
+test('push step forwards image.latest so the push maintains a :latest tag', async () => {
+  const log = []; const d = deps(log);
+  let receivedLatest;
+  d.docker.pushImage = async ({ sha, latest }) => { receivedLatest = latest; log.push(`push:${sha}`); };
+  const unit = { repo: 'sai', repoPath: '/x', image: { name: 'sai-worker', ecr: 'sai-worker', source: { local: true }, latest: true },
+    workload: 'llmcatalog-discover', kind: 'cronjob', manifests: [], dependsOn: [],
+    defaults: { context: 'c', namespace: 'n', platform: 'p', account: 'a', region: 'r' }, repoUri: 'r/sai-worker', stamp: [] };
+  await execute([{ kind: 'push', unit }], { deps: d });
+  assert.equal(receivedLatest, true);
+});
 test('secret step syncs the carried secret object with the unit namespace', async () => {
   const log = []; const d = deps(log);
   const unit = { repo: 'sai', repoPath: '/x', image: { name: 'a', source: { local: true } },

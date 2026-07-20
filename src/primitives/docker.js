@@ -6,7 +6,17 @@ function buildImage({ ecrUri, sha, dockerfile, context, platform, cwd, dryRun, b
   args.push('--load', context);
   return _run('docker', args, { cwd, dryRun });
 }
-function pushImage({ ecrUri, sha, dryRun }) { return _run('docker', ['push', `${ecrUri}:${sha}`], { dryRun }); }
+// Push the immutable :<sha> tag. When the image opts into `latest: true`, also
+// move a mutable :latest tag onto this build so workloads that reference
+// <ecr>:latest (e.g. rarely-shipped cronjobs) track the newest build without
+// being re-shipped. Never advance :latest for a dirty (`-dirty`) build.
+async function pushImage({ ecrUri, sha, latest = false, dryRun }) {
+  await _run('docker', ['push', `${ecrUri}:${sha}`], { dryRun });
+  if (latest && !String(sha).endsWith('-dirty')) {
+    await _run('docker', ['tag', `${ecrUri}:${sha}`, `${ecrUri}:latest`], { dryRun });
+    await _run('docker', ['push', `${ecrUri}:latest`], { dryRun });
+  }
+}
 function buildDeps(image, cwd, dryRun) {
   const d = image.depsImage;
   return _run('docker', ['buildx', 'build', '--platform', 'linux/arm64', '-f', d.dockerfile, '-t', d.tag, '--load', '.'], { cwd, dryRun });

@@ -42,7 +42,7 @@ async function execute(steps, { dryRun = false, allowDirty = false, deps } = {})
       else if (step.kind === 'build') await d.docker.buildImage({ ecrUri: u.repoUri, sha, dockerfile: u.image.dockerfile, context: u.image.context || '.', platform: u.defaults.platform, cwd, dryRun, buildArgs: await d.buildArgs.resolveBuildArgs(u.image, cwd, { dryRun }) });
       else if (step.kind === 'push') {
         if (!loggedIn) { await d.docker.ecrLogin({ account: u.defaults.account, region: u.defaults.region, profile: u.defaults.profile, dryRun }); await d.docker.ensureRepo({ ecr: u.image.ecr, account: u.defaults.account, region: u.defaults.region, profile: u.defaults.profile, dryRun }); loggedIn = true; }
-        await d.docker.pushImage({ ecrUri: u.repoUri, sha, dryRun });
+        await d.docker.pushImage({ ecrUri: u.repoUri, sha, latest: !!u.image.latest, dryRun });
       } else if (step.kind === 'apply') {
         const vars = {}; for (const s of u.stamp) vars[s.var] = `${s.repoUri}:${sha}`;
         const files = d.render.renderManifests(u.manifests, vars, u.repoPath, { dryRun });
