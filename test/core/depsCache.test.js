@@ -19,3 +19,11 @@ test('same image name in different repos do not collide', () => {
   assert.equal(needsDepsRebuild(img, repo, 'repoA', state), true);
   assert.equal(needsDepsRebuild(img, repo, 'repoB', state), true);
 });
+test('rebuild when the cached deps image is gone even if lockfiles are unchanged', () => {
+  const { repo, state } = setup();
+  const img = { name: 'sai-worker', depsImage: { tag: 'sai-worker:deps', rebuildOn: ['uv.lock'] } };
+  const present = () => true, absent = () => false;
+  assert.equal(needsDepsRebuild(img, repo, 'sai', state, present), true);   // first run: hash is new
+  assert.equal(needsDepsRebuild(img, repo, 'sai', state, present), false);  // unchanged + image present
+  assert.equal(needsDepsRebuild(img, repo, 'sai', state, absent), true);    // image pruned → rebuild
+});
