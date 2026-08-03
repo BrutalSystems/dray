@@ -37,7 +37,12 @@ async function execute(steps, { dryRun = false, allowDirty = false, deps } = {})
       }
       const sha = await shaForUnit(u, d, shaCache, dryRun, allowDirty);
       if (u._clone && !clones.includes(u._clone)) clones.push(u._clone);
-      const cwd = u._clone ? u._clone.dir : u.repoPath;
+      // Real builds use the clone dir. On dry-run we skip the clone, so show the
+      // git source (not the local repo `dray` was invoked from) — otherwise the
+      // printed command misleadingly implies the local Dockerfile is built.
+      const src = u.image && u.image.source;
+      const cwd = u._clone ? u._clone.dir
+        : (dryRun && src && src.git ? `<git ${src.git}@${src.ref || 'HEAD'} — cloned at build>` : u.repoPath);
       if (step.kind === 'deps') { if (d.depsCache.needsDepsRebuild(u.image, cwd, u.repo)) await d.docker.buildDeps(u.image, cwd, dryRun); }
       else if (step.kind === 'build') await d.docker.buildImage({ ecrUri: u.repoUri, sha, dockerfile: u.image.dockerfile, context: u.image.context || '.', platform: u.defaults.platform, cwd, dryRun, buildArgs: await d.buildArgs.resolveBuildArgs(u.image, cwd, { dryRun }) });
       else if (step.kind === 'push') {

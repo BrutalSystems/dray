@@ -53,3 +53,16 @@ test('dirty local tree throws unless allowDirty', async () => {
   const unit = { repo: 'sai', repoPath: '/x', image: { name: 'a', source: { local: true } }, defaults: {}, stamp: [] };
   await assert.rejects(() => execute([{ kind: 'build', unit }], { deps: d }), /dirty/);
 });
+test('dry-run of a git-source image shows the git source as cwd, not the local repo', async () => {
+  const log = []; const d = deps(log);
+  let cwd;
+  d.docker.buildImage = async (a) => { cwd = a.cwd; log.push(`build:${a.sha}`); };
+  d.buildArgs = { resolveBuildArgs: async () => [] };
+  const unit = { repo: 'ems-be', repoPath: '/local/ems-be',
+    image: { name: 'jobs-service', source: { git: 'git@github.com:Org/jobs-service.git', ref: 'main' } },
+    defaults: {}, stamp: [] };
+  await execute([{ kind: 'build', unit }], { dryRun: true, deps: d });
+  assert.equal(log[0], 'build:DRYRUN');
+  assert.equal(cwd, '<git git@github.com:Org/jobs-service.git@main — cloned at build>');
+  assert.notEqual(cwd, '/local/ems-be');
+});
