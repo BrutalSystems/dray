@@ -35,7 +35,7 @@ Requires `docker buildx`, `kubectl`, `git`, `aws`, and (for pilets/secrets) `sop
 dray                        # interactive menu
 dray list                   # registered repos + targets
 dray ship <repo>:<target>   # deps?→build→push(SHA)→render+apply→rollout
-dray ship <repo>            # all enabled workloads in the repo
+dray ship <repo>            # all enabled workloads in the repo (skips manual ones)
 dray apply  <repo>:<target> # render + apply manifests only
 dray rollout <repo>:<target>
 dray status <repo>          # running image SHA vs HEAD
@@ -72,8 +72,13 @@ Global flags: `--dry-run` (print the plan, run nothing), `--allow-dirty`
     // kind: deployment (rolled out) or cronjob (applied only)
     { "name": "app", "kind": "deployment", "image": "app",
       "manifests": [".k8s/deployment.yaml", ".k8s/service.yaml"], "stampImages": ["app"] },
-    // disabled: kept in config but skipped (e.g. served elsewhere)
+    // disabled: kept in config but skipped (e.g. served elsewhere).
+    // Targeting it by name is an error.
     { "name": "legacy", "kind": "deployment", "image": "app", "manifests": ["..."], "disabled": true },
+    // manual: deployed only by `dray ship <repo>:<name>`, never by a bare-repo
+    // ship or --all. Use it to keep a workload out of CI (which ships the bare
+    // repo) while still deploying it on demand. Its image is skipped too.
+    { "name": "jobs", "kind": "deployment", "image": "jobs", "manifests": ["..."], "manual": true },
     // image-less: apply-only (third-party image lives literally in the manifest)
     { "name": "searxng", "kind": "deployment", "manifests": [".k8s/searxng.yaml"] }
   ],

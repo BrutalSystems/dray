@@ -51,3 +51,45 @@ test('workload with no image → apply-only unit (image null, empty stamp)', () 
   assert.deepEqual(u.stamp, []);
   assert.deepEqual(u.manifests, ['.k8s/searxng/deployment.yaml', '.k8s/searxng/configmap.yaml']);
 });
+
+// A `manual` workload is deployable on demand but must never be picked up by a
+// bare-repo ship — that is what CI runs, so `manual` is how a repo keeps a
+// workload out of its automatic pipeline without giving up `dray ship repo:name`.
+const regWithManual = { sai: { path: '/x/sai', config: {
+  name: 'sai',
+  images: [
+    { name: 'jobs-service', ecr: 'sai-jobs-service', source: { git: 'https://github.com/BrutalSystems/jobs-service' } },
+    { name: 'chat-service', ecr: 'chat-service', source: { local: true } },
+  ],
+  workloads: [
+    { name: 'jobs-service', kind: 'deployment', image: 'jobs-service', manifests: ['j'], manual: true, dependsOn: ['secret:jobs-secrets'] },
+    { name: 'chat-service', kind: 'deployment', image: 'chat-service', manifests: ['b'] },
+  ],
+  secrets: [{ name: 'jobs-secrets', kind: 'sops-manifest', file: 'j.enc.yaml' }],
+} } };
+test('resolveTargets skips manual workloads for bare repo', () => {
+  const units = resolveTargets({ registry: regWithManual, globalDefaults, spec: 'sai' });
+  assert.deepEqual(units.map((u) => u.workload), ['chat-service']);
+});
+test('a manual workload does not leak its image back in as an image-only unit', () => {
+  // Regression guard: the image-only fallback fires when no workload claims an
+  // image. A skipped manual workload still counts as claiming it, so CI must not
+  // build or push it.
+  const units = resolveTargets({ registry: regWithManual, globalDefaults, spec: 'sai' });
+  assert.deepEqual(units.map((u) => u.image && u.image.name), ['chat-service']);
+});
+test('--all skips manual workloads too', () => {
+  const units = resolveTargets({ registry: regWithManual, globalDefaults, spec: '--all' });
+  assert.deepEqual(units.map((u) => u.workload), ['chat-service']);
+});
+test('explicitly targeting a manual workload resolves it, unlike disabled', () => {
+  const [u] = resolveTargets({ registry: regWithManual, globalDefaults, spec: 'sai:jobs-service' });
+  assert.equal(u.workload, 'jobs-service');
+  assert.equal(u.repoUri, '123.dkr.ecr.us-east-2.amazonaws.com/sai-jobs-service');
+  assert.deepEqual(u.stamp, [{ var: 'JOBS_SERVICE_IMAGE', repoUri: '123.dkr.ecr.us-east-2.amazonaws.com/sai-jobs-service' }]);
+  assert.deepEqual(u.dependsOn, ['secret:jobs-secrets']);
+});
+test('targeting a manual workload by its image name also resolves it', () => {
+  const units = resolveTargets({ registry: regWithManual, globalDefaults, spec: 'sai:jobs-service' });
+  assert.equal(units.length, 1);
+});

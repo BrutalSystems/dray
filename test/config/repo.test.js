@@ -28,3 +28,15 @@ test('rejects bad secret kind', () => {
   const bad = { ...valid, secrets: [{ name: 's', kind: 'plain' }] };
   assert.throws(() => validateRepoConfig(bad), /secret .* kind/);
 });
+test('rejects non-boolean manual (a JSON string is truthy and would silently skip CI)', () => {
+  const bad = { ...valid, workloads: [{ name: 'x', kind: 'deployment', image: 'sai-worker', manifests: ['a'], manual: 'false' }] };
+  assert.throws(() => validateRepoConfig(bad), /manual must be a boolean/);
+});
+test('rejects non-boolean disabled', () => {
+  const bad = { ...valid, workloads: [{ name: 'x', kind: 'deployment', image: 'sai-worker', manifests: ['a'], disabled: 'true' }] };
+  assert.throws(() => validateRepoConfig(bad), /disabled must be a boolean/);
+});
+test('accepts manual: true', () => {
+  const ok = { ...valid, workloads: [{ name: 'x', kind: 'deployment', image: 'sai-worker', manifests: ['a'], manual: true }] };
+  assert.equal(validateRepoConfig(ok).workloads[0].manual, true);
+});

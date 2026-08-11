@@ -38,6 +38,13 @@ function unitsForRepo(name, entry, globalDefaults, filter) {
       }
       continue;
     }
+    // Deployed only when explicitly targeted (dray ship repo:name). Skipped by a
+    // bare-repo ship and --all -- that is what CI runs, so `manual` keeps a
+    // workload out of the automatic pipeline while still allowing an on-demand
+    // deploy. Unlike `disabled`, targeting it by name is not an error. The image
+    // is skipped with it: the image-only fallback below only fires when NO
+    // workload claims the image, and a skipped manual workload still claims it.
+    if (w.manual && !filter) continue;
     mk(images.get(w.image), w);
   }
   for (const img of images.values()) {

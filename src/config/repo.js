@@ -21,6 +21,14 @@ function validateRepoConfig(cfg) {
     if (!WORKLOAD_KINDS.has(w.kind)) e.push(`workload "${w.name}" kind must be deployment|cronjob`);
     if (w.image !== undefined && !imageNames.has(w.image)) e.push(`workload "${w.name}" references unknown image "${w.image}"`);
     if (!Array.isArray(w.manifests) || w.manifests.length === 0) e.push(`workload "${w.name}" needs a non-empty manifests list`);
+    // Both gate deployment on truthiness, so a JSON string ("false", "no") would
+    // silently skip the workload -- in `manual`'s case, silently drop it from CI.
+    // Fail loud instead of deploying something different from what was meant.
+    for (const flag of ['disabled', 'manual']) {
+      if (w[flag] !== undefined && typeof w[flag] !== 'boolean') {
+        e.push(`workload "${w.name}" ${flag} must be a boolean, got ${typeof w[flag]}`);
+      }
+    }
   }
   for (const s of cfg.secrets || []) {
     if (!s.name) e.push('secret missing name');

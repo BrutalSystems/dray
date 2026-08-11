@@ -35,3 +35,33 @@ test('build dedups shared image across workloads', () => {
   const units = [unit('sai-worker', 'sai-api'), unit('sai-worker', 'sai-api-warmworker')];
   assert.deepEqual(planFor(units, 'build').map((s) => s.kind), ['deps', 'build']);
 });
+
+// End-to-end guard for the property `manual` exists to provide: a bare-repo ship
+// (what CI runs) must not build the manual workload's image, apply its manifests,
+// or -- critically -- run a secret step for it. A sops decrypt in CI needs an age
+// key that CI deliberately does not have, so a leaked secret step fails the build.
+const { resolveTargets } = require('../../src/core/resolve');
+test('bare-repo ship plan omits a manual workload entirely, including its secret step', () => {
+  const registry = { sift: { path: '/x/sift', config: {
+    name: 'sift',
+    images: [
+      { name: 'sift-be', ecr: 'bs-sift-be', source: { local: true } },
+      { name: 'jobs-service', ecr: 'bs-sift-jobs-service', source: { git: 'https://example.invalid/jobs-service' } },
+    ],
+    workloads: [
+      { name: 'sift-be', kind: 'deployment', image: 'sift-be', manifests: ['.k8s/deployment.yaml'] },
+      { name: 'sift-jobs-service', kind: 'deployment', image: 'jobs-service', manifests: ['.k8s/jobs-service/deployment.yaml'], manual: true, dependsOn: ['secret:jobs-secrets'] },
+    ],
+    secrets: [{ name: 'jobs-secrets', kind: 'sops-manifest', file: '.k8s/jobs-service/secret.sops.yaml' }],
+  } } };
+  const globalDefaults = { account: '123', region: 'us-east-2', context: 'st-eks', namespace: 'bs' };
+
+  const ciSteps = planFor(resolveTargets({ registry, globalDefaults, spec: 'sift' }), 'ship');
+  assert.equal(ciSteps.filter((s) => s.kind === 'secret').length, 0);
+  assert.ok(!ciSteps.some((s) => s.label.includes('jobs-service')));
+
+  // ...but an explicit manual deploy still gets the full plan, secret and all.
+  const manualSteps = planFor(resolveTargets({ registry, globalDefaults, spec: 'sift:sift-jobs-service' }), 'ship');
+  assert.equal(manualSteps.filter((s) => s.kind === 'secret').length, 1);
+  assert.ok(manualSteps.some((s) => s.kind === 'push' && s.label.includes('jobs-service')));
+});
