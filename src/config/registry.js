@@ -10,16 +10,22 @@ function removeRepo(file, name) { const r = loadRegistry(file); delete r[name]; 
 // without a manual `dray reload`. Falls back to the snapshot when the repo
 // isn't checked out here (stat throws) or its config is momentarily invalid
 // (loadRepoConfig throws) — a broken repo must not break `list`/`--all`.
-function refreshEntry(entry) {
+function refreshEntry(entry, name) {
   try {
     const mtime = Math.floor(fs.statSync(path.join(entry.path, '.dray', 'config.json')).mtimeMs);
     if (mtime <= (Date.parse(entry.addedAt) || 0)) return entry;
-    return { ...entry, config: loadRepoConfig(entry.path), addedAt: new Date(mtime).toISOString() };
+    const config = loadRepoConfig(entry.path);
+    // Only adopt a config that still belongs to this entry. A path pointing at a
+    // different project (a relative path left by an old `dray add .`, or a moved
+    // checkout) would otherwise have its config silently written into this key and
+    // PERSISTED -- turning `dray ship <name>` into a deploy of someone else's repo.
+    if (name !== undefined && config.name !== name) return entry;
+    return { ...entry, config, addedAt: new Date(mtime).toISOString() };
   } catch { return entry; }
 }
 function allRepos(file = REGISTRY) {
   const reg = loadRegistry(file); let changed = false;
-  for (const [n, e] of Object.entries(reg)) { const f = refreshEntry(e); if (f !== e) { reg[n] = f; changed = true; } }
+  for (const [n, e] of Object.entries(reg)) { const f = refreshEntry(e, n); if (f !== e) { reg[n] = f; changed = true; } }
   if (changed) saveRegistry(file, reg);
   return reg;
 }

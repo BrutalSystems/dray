@@ -33,3 +33,25 @@ test('allRepos keeps the cached snapshot when the repo is not checked out here',
   reg.saveRegistry(f, { demo: { path: '/no/such/repo', config: { name: 'demo', secrets: [{ name: 'cached' }] }, addedAt: '2000-01-01T00:00:00.000Z' } });
   assert.deepEqual(reg.allRepos(f).demo.config.secrets.map((s) => s.name), ['cached']);
 });
+
+// A relative path in the registry resolves against whatever cwd dray later runs in,
+// so a second repo added the same way silently takes over the first one's entry.
+// refreshEntry is the vector: it re-reads path/.dray/config.json and PERSISTS the
+// result, so one `dray list` from the wrong directory rewrites a cached config to a
+// different project's. Guard on the config name matching the registry key.
+test('allRepos does not overwrite an entry with a different project config', () => {
+  const f = tmp();
+  const dir = repoWith([{ name: 'intruder', kind: 'sops-manifest', file: 'x' }]);
+  // The live config at `dir` is named "demo"; this entry is keyed "other-project".
+  reg.saveRegistry(f, { 'other-project': { path: dir, config: { name: 'other-project', secrets: [{ name: 'cached' }] }, addedAt: '2000-01-01T00:00:00.000Z' } });
+  const got = reg.allRepos(f)['other-project'].config;
+  assert.equal(got.name, 'other-project');
+  assert.deepEqual(got.secrets.map((s) => s.name), ['cached']);
+});
+
+test('allRepos still reloads when the config name matches the registry key', () => {
+  const f = tmp();
+  const dir = repoWith([{ name: 'fresh', kind: 'sops-manifest', file: 'x' }]);
+  reg.saveRegistry(f, { demo: { path: dir, config: { name: 'demo', secrets: [] }, addedAt: '2000-01-01T00:00:00.000Z' } });
+  assert.deepEqual(reg.allRepos(f).demo.config.secrets.map((s) => s.name), ['fresh']);
+});
