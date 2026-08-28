@@ -52,9 +52,25 @@ async function execute(steps, { dryRun = false, allowDirty = false, deps } = {})
         const vars = {}; for (const s of u.stamp) vars[s.var] = `${s.repoUri}:${sha}`;
         const files = d.render.renderManifests(u.manifests, vars, u.repoPath, { dryRun });
         if (files[0]) renderDirs.push(path.dirname(files[0]));
+        // Read the running image BEFORE applying. If it differs from what we
+        // are about to stamp, this apply changes the pod template and the
+        // Deployment controller starts a rollout on its own — so the rollout
+        // step that follows must wait rather than restart, or every ship
+        // produces two ReplicaSets and replaces the pod twice.
+        //
+        // Deliberately conservative: any doubt (dry run, cronjob, unreadable
+        // deployment) leaves the restart in place, which is the previous
+        // behaviour.
+        u._applyStartsRollout = false;
+        if (!dryRun && u.workload && u.kind !== 'cronjob') {
+          try {
+            const before = await d.kubectl.runningImage({ workload: u.workload, kind: u.kind, context: u.defaults.context, namespace: u.defaults.namespace });
+            u._applyStartsRollout = before !== `${u.repoUri}:${sha}`;
+          } catch { u._applyStartsRollout = false; }
+        }
         for (const f of files) await d.kubectl.applyFile({ file: f, context: u.defaults.context, namespace: u.defaults.namespace, dryRun });
       } else if (step.kind === 'rollout') {
-        try { await d.kubectl.rollout({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun }); }
+        try { await d.kubectl.rollout({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun, restart: !u._applyStartsRollout }); }
         catch (err) { await d.kubectl.rolloutUndo({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun }); throw err; }
       }
     }

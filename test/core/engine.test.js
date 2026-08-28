@@ -66,3 +66,62 @@ test('dry-run of a git-source image shows the git source as cwd, not the local r
   assert.equal(cwd, '<git git@github.com:Org/jobs-service.git@main — cloned at build>');
   assert.notEqual(cwd, '/local/ems-be');
 });
+
+// --- ship must not roll the deployment twice --------------------------------
+//
+// `apply` stamps the manifest with the new image SHA, which the Deployment
+// controller acts on immediately. The rollout step that follows was then
+// issuing `rollout restart` regardless, producing a second ReplicaSet and a
+// second pod replacement. Observed on cxx-mcp: two ReplicaSets one second
+// apart on every ship, and a deployment revision count in the high 80s.
+function shipSteps(unit) {
+  return [{ kind: 'apply', unit }, { kind: 'rollout', unit }];
+}
+function shipUnit() {
+  return { repo: 'r', repoPath: '/x', image: { name: 'agent', source: { local: true } }, workload: 'agent',
+    kind: 'deployment', manifests: ['d.yaml'], dependsOn: [],
+    defaults: { context: 'c', namespace: 'n', platform: 'p', account: 'a', region: 'r' },
+    repoUri: 'r/agent', stamp: [{ var: 'AGENT_IMAGE', repoUri: 'r/agent' }] };
+}
+
+test('ship does not restart when the apply already changed the image', async () => {
+  const log = []; const d = deps(log);
+  let sawRestart;
+  d.kubectl.runningImage = async () => 'r/agent:OLDSHA';
+  d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
+  await execute(shipSteps(shipUnit()), { deps: d });
+  assert.equal(sawRestart, false, 'apply already triggered the rollout; restart would be a second one');
+});
+
+test('ship still restarts when the image is unchanged', async () => {
+  // Re-shipping the same commit to pick up a changed Secret: apply is a no-op,
+  // so the restart is the only thing that cycles pods. Removing it outright
+  // would silently do nothing here.
+  const log = []; const d = deps(log);
+  let sawRestart;
+  d.kubectl.runningImage = async () => 'r/agent:abc';   // deps() computes sha 'abc'
+  d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
+  await execute(shipSteps(shipUnit()), { deps: d });
+  assert.equal(sawRestart, true);
+});
+
+test('ship restarts when the running image cannot be determined', async () => {
+  // Conservative: an unreadable/absent deployment must not silently skip the
+  // restart. Falling back to the previous behaviour is the safe direction.
+  const log = []; const d = deps(log);
+  let sawRestart;
+  d.kubectl.runningImage = async () => { throw new Error('kubectl exploded'); };
+  d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
+  await execute(shipSteps(shipUnit()), { deps: d });
+  assert.equal(sawRestart, true);
+});
+
+test('dry-run does not query the cluster and shows the restart', async () => {
+  const log = []; const d = deps(log);
+  let queried = false; let sawRestart;
+  d.kubectl.runningImage = async () => { queried = true; return ''; };
+  d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
+  await execute(shipSteps(shipUnit()), { deps: d, dryRun: true });
+  assert.equal(queried, false, 'a dry run must not touch the cluster');
+  assert.equal(sawRestart, true);
+});
