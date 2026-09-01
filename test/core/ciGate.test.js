@@ -1,6 +1,12 @@
 const { test } = require('node:test'); const assert = require('node:assert/strict');
 const { evaluate, gatedRepos, assertCiGreen } = require('../../src/core/ciGate');
 
+// dray's own CI sets GITHUB_ACTIONS=true, and assertCiGreen deliberately no-ops
+// there -- inherited, it would quietly turn every gate test below into a test of
+// the escape hatch. node --test gives each file its own process, so pinning it
+// off here is safe, and the one test that needs it sets it itself.
+delete process.env.GITHUB_ACTIONS;
+
 const HEAD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const P1 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const P2 = 'cccccccccccccccccccccccccccccccccccccccc';
@@ -81,9 +87,9 @@ test('assertCiGreen skips dry runs', async () => {
 });
 // Inside GitHub Actions the gate would be waiting on the run that invoked it.
 test('assertCiGreen skips when running inside GitHub Actions', async () => {
-  const prev = process.env.GITHUB_ACTIONS; process.env.GITHUB_ACTIONS = 'true';
+  process.env.GITHUB_ACTIONS = 'true';
   try { await assertCiGreen([unit()], { deps: boom, log: quiet }); }
-  finally { if (prev === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = prev; }
+  finally { delete process.env.GITHUB_ACTIONS; }
 });
 test('assertCiGreen warns but proceeds with --skip-ci-check', async () => {
   const lines = [];
