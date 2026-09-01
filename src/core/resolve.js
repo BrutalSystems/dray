@@ -1,4 +1,4 @@
-const KEYS = ['profile', 'region', 'account', 'platform', 'context', 'namespace'];
+const KEYS = ['profile', 'region', 'account', 'platform', 'context', 'namespace', 'ciGate'];
 const upperSnake = (s) => s.replace(/[^a-zA-Z0-9]+/g, '_').toUpperCase();
 function imageVar(image) { return image.templateVar || `${upperSnake(image.name)}_IMAGE`; }
 function mergeDefaults(globalDefaults = {}, repoCfg = {}, entry = {}) {

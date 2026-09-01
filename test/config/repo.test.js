@@ -40,3 +40,10 @@ test('accepts manual: true', () => {
   const ok = { ...valid, workloads: [{ name: 'x', kind: 'deployment', image: 'sai-worker', manifests: ['a'], manual: true }] };
   assert.equal(validateRepoConfig(ok).workloads[0].manual, true);
 });
+test('rejects non-boolean defaults.ciGate', () => {
+  const bad = { ...valid, defaults: { ciGate: 'true' } };
+  assert.throws(() => validateRepoConfig(bad), /ciGate must be a boolean/);
+});
+test('accepts defaults.ciGate true', () => {
+  assert.doesNotThrow(() => validateRepoConfig({ ...valid, defaults: { ciGate: true } }));
+});

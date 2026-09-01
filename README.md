@@ -45,13 +45,18 @@ dray secrets sync <repo>
 ```
 
 Global flags: `--dry-run` (print the plan, run nothing), `--allow-dirty`
-(build a dirty tree, tags `:<sha>-dirty`), `--all` (every registered repo).
+(build a dirty tree, tags `:<sha>-dirty`), `--all` (every registered repo),
+`--skip-ci-check` (deploy even if CI is red — see [CI gate](#ci-gate)).
 
 ## `.dray/config.json` (per repo)
 
 ```jsonc
 {
   "name": "myrepo",
+  // optional per-repo overrides of ~/.dray/config.json defaults
+  // (profile, region, account, platform, context, namespace, ciGate);
+  // a workload may override them again.
+  "defaults": { "namespace": "bs", "ciGate": true },
   "images": [
     { "name": "app", "ecr": "app", "source": { "local": true },
       "dockerfile": "Dockerfile", "context": ".",
@@ -92,6 +97,49 @@ Global flags: `--dry-run` (print the plan, run nothing), `--allow-dirty`
   }
 }
 ```
+
+### CI gate
+
+With `"ciGate": true` in a repo's `defaults`, `push`, `apply`, `rollout` and
+`ship` refuse to run unless that repo's GitHub Actions CI is green for the code
+being shipped. It reads `gh run list` (so `gh` must be installed and
+authenticated) and blocks on all three of:
+
+- **failed** — CI is red.
+- **pending** — CI is still running. This is the case that motivated the gate:
+  a deploy once pushed an image to ECR six minutes before the test suite it was
+  racing had finished, and nothing would have stopped a red result.
+- **absent** — no run exists for HEAD *or any recent ancestor*, i.e. CI has
+  never run for this line of work. "No run found" has to block: if it passed,
+  never pushing would be the way around the gate.
+
+It does *not* demand a run for HEAD itself. Workflows commonly use
+`paths-ignore`, so a docs-only commit produces no run at all; requiring one
+would refuse to ship a README change, and a gate that blocks legitimate work
+gets switched off. Instead dray walks back to the **newest CI-covered
+ancestor** and requires that verdict to be green.
+
+Default is off, so registering a repo does not change its behavior — arm it
+per repo. `--skip-ci-check` overrides the gate for one command and prints a
+loud warning. The gate also self-disables when `GITHUB_ACTIONS=true` (inside
+CI it would be waiting on the run that invoked it — a deadlock) and on
+`--dry-run`.
+
+**What it does not cover**, deliberately:
+
+- Images built from `source.git` — their code lives in another repository whose
+  CI is not this repo's to read, so those units are skipped rather than falsely
+  reported as verified.
+- `rollback`, which re-applies a SHA that was already deployed. Blocking a
+  rollback because `main` is red would be exactly backwards during an incident.
+- `publish` (pilets), which does not go through the deploy path.
+- A commit you have not pushed: with no run of its own it falls back to its
+  newest covered ancestor, so an unpushed change on top of a green commit
+  passes. The gate closes the red/racing cases, not "I never pushed it".
+
+It reads the repo's 100 most recent workflow runs. In a repo busy enough that
+HEAD's run has already fallen out of that window, the gate reports `absent` and
+blocks — noisy, but never the wrong way around.
 
 ### Image pinning
 

@@ -24,11 +24,16 @@ function validateRepoConfig(cfg) {
     // Both gate deployment on truthiness, so a JSON string ("false", "no") would
     // silently skip the workload -- in `manual`'s case, silently drop it from CI.
     // Fail loud instead of deploying something different from what was meant.
-    for (const flag of ['disabled', 'manual']) {
+    for (const flag of ['disabled', 'manual', 'ciGate']) {
       if (w[flag] !== undefined && typeof w[flag] !== 'boolean') {
         e.push(`workload "${w.name}" ${flag} must be a boolean, got ${typeof w[flag]}`);
       }
     }
+  }
+  // A JSON string ("false") is truthy and would silently ARM the gate -- or, as
+  // "true" in the wrong place, silently disarm it. Both are worth failing loud.
+  if (cfg.defaults && cfg.defaults.ciGate !== undefined && typeof cfg.defaults.ciGate !== 'boolean') {
+    e.push(`defaults.ciGate must be a boolean, got ${typeof cfg.defaults.ciGate}`);
   }
   for (const s of cfg.secrets || []) {
     if (!s.name) e.push('secret missing name');

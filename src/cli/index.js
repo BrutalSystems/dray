@@ -6,6 +6,7 @@ async function run(argv) {
   program.version(require('../../package.json').version, '-v, --version', 'show dray version');
   program.option('--dry-run', 'print planned commands, run nothing');
   program.option('--allow-dirty', 'allow building from a dirty tree (tags :<sha>-dirty)');
+  program.option('--skip-ci-check', 'deploy even if CI is red, pending, or absent');
   for (const c of ['version', 'init', 'add', 'remove', 'reload', 'list',
     'build', 'push', 'apply', 'rollout', 'ship', 'status', 'rollback', 'publish', 'secrets']) {
     require(`./commands/${c}`)(program);
