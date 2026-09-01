@@ -52,25 +52,25 @@ async function execute(steps, { dryRun = false, allowDirty = false, deps } = {})
         const vars = {}; for (const s of u.stamp) vars[s.var] = `${s.repoUri}:${sha}`;
         const files = d.render.renderManifests(u.manifests, vars, u.repoPath, { dryRun });
         if (files[0]) renderDirs.push(path.dirname(files[0]));
-        // Read the running image BEFORE applying. If it differs from what we
-        // are about to stamp, this apply changes the pod template and the
-        // Deployment controller starts a rollout on its own — so the rollout
-        // step that follows must wait rather than restart, or every ship
-        // produces two ReplicaSets and replaces the pod twice.
-        //
-        // Deliberately conservative: any doubt (dry run, cronjob, unreadable
-        // deployment) leaves the restart in place, which is the previous
-        // behaviour.
-        u._applyStartsRollout = false;
-        if (!dryRun && u.workload && u.kind !== 'cronjob') {
-          try {
-            const before = await d.kubectl.runningImage({ workload: u.workload, kind: u.kind, context: u.defaults.context, namespace: u.defaults.namespace });
-            u._applyStartsRollout = before !== `${u.repoUri}:${sha}`;
-          } catch { u._applyStartsRollout = false; }
-        }
+        // Applying may or may not change the pod template; the rollout step below decides
+        // whether a restart is needed by asking the CLUSTER, not by us telling it from here.
+        // A flag set in this step cannot reach a separate `dray rollout` invocation.
         for (const f of files) await d.kubectl.applyFile({ file: f, context: u.defaults.context, namespace: u.defaults.namespace, dryRun });
       } else if (step.kind === 'rollout') {
-        try { await d.kubectl.rollout({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun, restart: !u._applyStartsRollout }); }
+        // If the controller is already rolling this deployment -- because an apply just
+        // changed the pod template, in THIS process or a previous `dray apply` invocation --
+        // then `rollout restart` would start a second one, producing a second ReplicaSet and
+        // replacing every pod twice. Wait for the one in flight instead.
+        //
+        // Conservative on doubt (dry run, cronjob, unreadable deployment): keep restarting,
+        // because a skipped restart silently does nothing at all.
+        let inFlight = false;
+        if (!dryRun && u.kind !== 'cronjob') {
+          try {
+            inFlight = await d.kubectl.rolloutInProgress({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace });
+          } catch { inFlight = false; }
+        }
+        try { await d.kubectl.rollout({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun, restart: !inFlight }); }
         catch (err) { await d.kubectl.rolloutUndo({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun }); throw err; }
       }
     }

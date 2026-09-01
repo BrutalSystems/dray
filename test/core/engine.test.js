@@ -84,33 +84,32 @@ function shipUnit() {
     repoUri: 'r/agent', stamp: [{ var: 'AGENT_IMAGE', repoUri: 'r/agent' }] };
 }
 
-test('ship does not restart when the apply already changed the image', async () => {
+test('ship does not restart when a rollout is already under way', async () => {
   const log = []; const d = deps(log);
   let sawRestart;
-  d.kubectl.runningImage = async () => 'r/agent:OLDSHA';
+  d.kubectl.rolloutInProgress = async () => true;
   d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
   await execute(shipSteps(shipUnit()), { deps: d });
   assert.equal(sawRestart, false, 'apply already triggered the rollout; restart would be a second one');
 });
 
-test('ship still restarts when the image is unchanged', async () => {
-  // Re-shipping the same commit to pick up a changed Secret: apply is a no-op,
-  // so the restart is the only thing that cycles pods. Removing it outright
+test('ship still restarts when the deployment is stable', async () => {
+  // Re-shipping the same commit to pick up a changed Secret: apply is a no-op, so nothing
+  // is in flight and the restart is the only thing that cycles pods. Removing it outright
   // would silently do nothing here.
   const log = []; const d = deps(log);
   let sawRestart;
-  d.kubectl.runningImage = async () => 'r/agent:abc';   // deps() computes sha 'abc'
+  d.kubectl.rolloutInProgress = async () => false;
   d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
   await execute(shipSteps(shipUnit()), { deps: d });
   assert.equal(sawRestart, true);
 });
 
-test('ship restarts when the running image cannot be determined', async () => {
-  // Conservative: an unreadable/absent deployment must not silently skip the
-  // restart. Falling back to the previous behaviour is the safe direction.
+test('ship restarts when rollout state cannot be determined', async () => {
+  // Conservative: an unreadable/absent deployment must not silently skip the restart.
   const log = []; const d = deps(log);
   let sawRestart;
-  d.kubectl.runningImage = async () => { throw new Error('kubectl exploded'); };
+  d.kubectl.rolloutInProgress = async () => { throw new Error('kubectl exploded'); };
   d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
   await execute(shipSteps(shipUnit()), { deps: d });
   assert.equal(sawRestart, true);
@@ -119,9 +118,33 @@ test('ship restarts when the running image cannot be determined', async () => {
 test('dry-run does not query the cluster and shows the restart', async () => {
   const log = []; const d = deps(log);
   let queried = false; let sawRestart;
-  d.kubectl.runningImage = async () => { queried = true; return ''; };
+  d.kubectl.rolloutInProgress = async () => { queried = true; return true; };
   d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
   await execute(shipSteps(shipUnit()), { deps: d, dryRun: true });
   assert.equal(queried, false, 'a dry run must not touch the cluster');
   assert.equal(sawRestart, true);
+});
+
+test('a rollout-only invocation still skips the restart (regression: CI double-roll)', async () => {
+  // THE BUG THIS FIXES. CI runs `dray apply` and `dray rollout` as two separate processes,
+  // so the apply step cannot hand anything to the rollout step. Observed 2026-09-01 in
+  // brokenhip-be: two ReplicaSets three seconds apart, every pod replaced twice per deploy.
+  // The rollout step must reach its own conclusion from cluster state alone.
+  const log = []; const d = deps(log);
+  let sawRestart;
+  d.kubectl.rolloutInProgress = async () => true;
+  d.kubectl.rollout = async ({ restart }) => { sawRestart = restart; log.push('roll'); };
+  const u = shipUnit();
+  await execute([{ kind: 'rollout', label: 'rollout agent', unit: u }], { deps: d });
+  assert.equal(sawRestart, false, 'no apply ran in THIS process; the cluster is the only source of truth');
+});
+
+test('cronjobs never query rollout state', async () => {
+  const log = []; const d = deps(log);
+  let queried = false;
+  d.kubectl.rolloutInProgress = async () => { queried = true; return true; };
+  d.kubectl.rollout = async () => { log.push('roll'); };
+  const u = shipUnit(); u.kind = 'cronjob';
+  await execute([{ kind: 'rollout', label: 'rollout agent', unit: u }], { deps: d });
+  assert.equal(queried, false, 'cronjobs have no rollout to be in flight');
 });

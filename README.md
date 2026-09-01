@@ -37,7 +37,7 @@ dray list                   # registered repos + targets
 dray ship <repo>:<target>   # deps?→build→push(SHA)→render+apply→rollout
 dray ship <repo>            # all enabled workloads in the repo (skips manual ones)
 dray apply  <repo>:<target> # render + apply manifests only
-dray rollout <repo>:<target>
+dray rollout <repo>:<target>  # restart + wait; skips the restart if one is already rolling
 dray status <repo>          # running image SHA vs HEAD
 dray rollback <repo>:<target> <sha>
 dray publish <repo>[:<pilet>]   # publish pilet(s) via sops exec-env
