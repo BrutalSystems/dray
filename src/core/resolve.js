@@ -23,6 +23,11 @@ function unitsForRepo(name, entry, globalDefaults, filter) {
       repo: name, repoPath: entry.path, image: image || null,
       workload: w ? w.name : null, kind: w ? w.kind : null,
       manifests: w ? w.manifests : [], dependsOn: (w && w.dependsOn) || [],
+      // Per-workload override for how long to wait on `rollout status`.
+      // Undefined falls back to kubectl.DEFAULT_ROLLOUT_TIMEOUT_SECONDS, which
+      // matches Kubernetes' own progressDeadlineSeconds. Raise it for workloads
+      // with large images that land on cold nodes.
+      rolloutTimeoutSeconds: (w && w.rolloutTimeoutSeconds) || undefined,
       defaults, repoUri: image ? ecrRepoUri(defaults, image) : null, stamp,
       _secrets: cfg.secrets || [],
     });

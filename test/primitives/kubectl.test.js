@@ -83,3 +83,40 @@ test('rolloutInProgress: asks for json, scoped to namespace and context', async 
   await k.rolloutInProgress({ deployment: 'api', context: 'st-eks', namespace: 'bs' });
   assert.deepEqual(args, ['get', 'deployment/api', '-o', 'json', '-n', 'bs', '--context', 'st-eks']);
 });
+
+test('rollout waits as long as the cluster does, not 180s', async () => {
+  // Kubernetes marks a rollout failed at `progressDeadlineSeconds` (600 by
+  // default). Waiting less than that and then treating the timeout as a
+  // failure means dray gives up while the cluster still considers the rollout
+  // healthy -- which is exactly what a cold node pulling a 1GB image causes.
+  let a; k._withRun(async (bin, args) => { a = args; return {}; });
+  await k.rollout({ deployment: 'api', context: 'c', namespace: 'n', restart: false });
+  assert.ok(a.includes('--timeout=600s'), `expected 600s default, got ${a.join(' ')}`);
+});
+
+test('rollout timeout is overridable per workload', async () => {
+  let a; k._withRun(async (bin, args) => { a = args; return {}; });
+  await k.rollout({ deployment: 'api', context: 'c', namespace: 'n', restart: false, timeoutSeconds: 900 });
+  assert.ok(a.includes('--timeout=900s'));
+});
+
+test('rolloutFailed is true only when KUBERNETES says the rollout failed', async () => {
+  // The authoritative signal is the Progressing condition, not our own
+  // impatience. ProgressDeadlineExceeded means the cluster gave up.
+  k._withRun(async () => ({ code: 0, stdout: JSON.stringify({
+    status: { conditions: [{ type: 'Progressing', reason: 'ProgressDeadlineExceeded' }] } }) }));
+  assert.equal(await k.rolloutFailed({ deployment: 'api', context: 'c', namespace: 'n' }), true);
+});
+
+test('rolloutFailed is false for a slow but progressing rollout', async () => {
+  k._withRun(async () => ({ code: 0, stdout: JSON.stringify({
+    status: { conditions: [{ type: 'Progressing', reason: 'ReplicaSetUpdated' }] } }) }));
+  assert.equal(await k.rolloutFailed({ deployment: 'api', context: 'c', namespace: 'n' }), false);
+});
+
+test('rolloutFailed is false when the deployment cannot be read', async () => {
+  // Conservative in the direction that does no harm: an unreadable deployment
+  // must not trigger an automatic rollback of code that may be running fine.
+  k._withRun(async () => ({ code: 1, stdout: '' }));
+  assert.equal(await k.rolloutFailed({ deployment: 'api', context: 'c', namespace: 'n' }), false);
+});

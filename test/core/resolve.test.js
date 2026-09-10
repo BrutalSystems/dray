@@ -93,3 +93,20 @@ test('targeting a manual workload by its image name also resolves it', () => {
   const units = resolveTargets({ registry: regWithManual, globalDefaults, spec: 'sai:jobs-service' });
   assert.equal(units.length, 1);
 });
+
+test('rolloutTimeoutSeconds flows from workload config onto the unit', () => {
+  // Without this the engine reads an always-undefined field and the override
+  // silently does nothing -- a config knob that looks wired and is not.
+  const reg = { sai: { path: '/x/sai', config: {
+    name: 'sai',
+    images: [{ name: 'sai-worker', ecr: 'sai-worker', source: { local: true } }],
+    workloads: [{ name: 'sai-api', kind: 'deployment', image: 'sai-worker', manifests: ['d.yaml'], rolloutTimeoutSeconds: 900 }],
+  } } };
+  const [u] = resolveTargets({ registry: reg, globalDefaults, spec: 'sai:sai-api' });
+  assert.equal(u.rolloutTimeoutSeconds, 900);
+});
+
+test('rolloutTimeoutSeconds is undefined when unset, so the default applies', () => {
+  const [u] = resolveTargets({ registry, globalDefaults, spec: 'sai:sai-api' });
+  assert.equal(u.rolloutTimeoutSeconds, undefined);
+});

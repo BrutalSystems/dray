@@ -148,3 +148,44 @@ test('cronjobs never query rollout state', async () => {
   await execute([{ kind: 'rollout', label: 'rollout agent', unit: u }], { deps: d });
   assert.equal(queried, false, 'cronjobs have no rollout to be in flight');
 });
+
+// ── Rollout timeout is not rollout failure ───────────────────────────────────
+function _rolloutUnit() {
+  return { repo: 'sai', repoPath: '/x', image: { name: 'api', source: { local: true } }, workload: 'api',
+    kind: 'deployment', manifests: [], dependsOn: [],
+    defaults: { context: 'c', namespace: 'n', platform: 'p', account: 'a', region: 'r' },
+    repoUri: 'r/api', stamp: [] };
+}
+
+test('a slow rollout is NOT rolled back when Kubernetes still considers it healthy', async () => {
+  // `kubectl rollout status --timeout` exiting non-zero means "I stopped
+  // waiting", not "this is broken". Undoing on that reverts working code and
+  // doubles the pod churn -- observed twice on st-eks, where a cold node
+  // pulling a 1.1GB image blew the old 180s wait while the new pod was 1/1.
+  const log = []; const d = deps(log);
+  d.kubectl.rollout = async () => { throw new Error('timed out waiting for the condition'); };
+  d.kubectl.rolloutFailed = async () => false;      // cluster: still progressing
+  d.kubectl.rolloutUndo = async () => log.push('undo');
+  await execute([{ kind: 'rollout', unit: _rolloutUnit() }], { deps: d });
+  assert.ok(!log.includes('undo'), `rolled back a healthy deploy: ${log}`);
+});
+
+test('a genuinely failed rollout IS rolled back', async () => {
+  const log = []; const d = deps(log);
+  d.kubectl.rollout = async () => { throw new Error('deadline exceeded'); };
+  d.kubectl.rolloutFailed = async () => true;       // cluster: ProgressDeadlineExceeded
+  d.kubectl.rolloutUndo = async () => log.push('undo');
+  await assert.rejects(() => execute([{ kind: 'rollout', unit: _rolloutUnit() }], { deps: d }));
+  assert.ok(log.includes('undo'), `did not roll back a real failure: ${log}`);
+});
+
+test('an unreadable deployment does not trigger a rollback', async () => {
+  // Conservative in the direction that does no harm: a missed rollback leaves
+  // running code running; a wrong one takes down something that was fine.
+  const log = []; const d = deps(log);
+  d.kubectl.rollout = async () => { throw new Error('timed out'); };
+  d.kubectl.rolloutFailed = async () => { throw new Error('kubectl unreachable'); };
+  d.kubectl.rolloutUndo = async () => log.push('undo');
+  await execute([{ kind: 'rollout', unit: _rolloutUnit() }], { deps: d });
+  assert.ok(!log.includes('undo'), `rolled back on an unreadable deployment: ${log}`);
+});

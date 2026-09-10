@@ -70,8 +70,30 @@ async function execute(steps, { dryRun = false, allowDirty = false, deps } = {})
             inFlight = await d.kubectl.rolloutInProgress({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace });
           } catch { inFlight = false; }
         }
-        try { await d.kubectl.rollout({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun, restart: !inFlight }); }
-        catch (err) { await d.kubectl.rolloutUndo({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun }); throw err; }
+        // A rollout error is NOT automatically a rollout failure.
+        //
+        // `kubectl rollout status --timeout` exiting non-zero means "I stopped
+        // waiting". Rolling back on that reverts working code and replaces every
+        // pod a second time -- observed twice on st-eks, where a cold node
+        // pulling a 1.1GB image blew the wait while the new pod was already 1/1.
+        //
+        // So ask the cluster. ProgressDeadlineExceeded is Kubernetes giving up,
+        // and that is the only thing worth undoing for. Anything else -- still
+        // progressing, or unreadable -- leaves the deploy alone: a missed
+        // rollback leaves running code running, a wrong one takes down
+        // something that was fine.
+        try {
+          await d.kubectl.rollout({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun, restart: !inFlight, timeoutSeconds: u.rolloutTimeoutSeconds });
+        } catch (err) {
+          let failed = false;
+          try { failed = await d.kubectl.rolloutFailed({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace }); }
+          catch { failed = false; }
+          if (failed) {
+            await d.kubectl.rolloutUndo({ deployment: u.workload, context: u.defaults.context, namespace: u.defaults.namespace, dryRun });
+            throw err;
+          }
+          console.warn(`[dray] ${u.workload}: stopped waiting, but the cluster still reports the rollout progressing — leaving it alone. Check: kubectl rollout status deployment/${u.workload} -n ${u.defaults.namespace} --context ${u.defaults.context}`);
+        }
       }
     }
   } finally {
