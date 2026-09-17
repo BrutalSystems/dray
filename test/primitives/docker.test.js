@@ -53,3 +53,26 @@ test('ecrLogin pipes get-login-password into docker login with profile', async (
   assert.equal(a[0], 'bash');
   assert.match(a[1].join(' '), /aws ecr get-login-password .*--profile st .*docker login .*123\.dkr\.ecr\.us-east-2/);
 });
+test('ensureRepo does nothing when the repo exists', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push(args[1]); return { code: 0, stdout: '{}', stderr: '' }; });
+  await docker.ensureRepo({ ecr: 'bs-x', region: 'us-east-2', profile: 'st' });
+  assert.deepEqual(calls, ['describe-repositories']);
+});
+test('ensureRepo creates the repo only when ECR says it does not exist', async () => {
+  const calls = []; docker._withRun(async (c, args) => {
+    calls.push(args[1]);
+    return args[1] === 'describe-repositories'
+      ? { code: 254, stdout: '', stderr: 'An error occurred (RepositoryNotFoundException) when calling the DescribeRepositories operation: The repository with name \'bs-x\' does not exist' }
+      : { code: 0, stdout: '', stderr: '' };
+  });
+  await docker.ensureRepo({ ecr: 'bs-x', region: 'us-east-2', profile: 'st' });
+  assert.deepEqual(calls, ['describe-repositories', 'create-repository']);
+});
+test('ensureRepo surfaces a denied describe instead of trying to create', async () => {
+  const calls = []; docker._withRun(async (c, args) => {
+    calls.push(args[1]);
+    return { code: 254, stdout: '', stderr: 'An error occurred (AccessDeniedException) when calling the DescribeRepositories operation: User: arn:aws:sts::1:assumed-role/X is not authorized to perform: ecr:DescribeRepositories' };
+  });
+  await assert.rejects(docker.ensureRepo({ ecr: 'bs-x', region: 'us-east-2', profile: 'st-bs' }), /ecr:DescribeRepositories/);
+  assert.deepEqual(calls, ['describe-repositories']);
+});

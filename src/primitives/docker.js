@@ -28,6 +28,13 @@ function ecrLogin({ account, region, profile, dryRun }) {
 async function ensureRepo({ ecr, account, region, profile, dryRun }) {
   const prof = profile ? ['--profile', profile] : [];
   const r = await _run('aws', ['ecr', 'describe-repositories', '--repository-names', ecr, '--region', region, ...prof], { capture: true, allowFail: true, dryRun });
-  if (r.code !== 0) await _run('aws', ['ecr', 'create-repository', '--repository-name', ecr, '--region', region, ...prof], { dryRun });
+  if (r.code === 0) return;
+  // Only a genuinely missing repo should be created. Any other failure (most often a
+  // profile lacking ecr:DescribeRepositories) must surface as-is — falling through to
+  // create-repository turns it into a misleading CreateRepository AccessDenied.
+  if (!/RepositoryNotFoundException/.test(r.stderr)) {
+    throw new Error(`aws ecr describe-repositories --repository-names ${ecr} failed (exit ${r.code})\n${r.stderr}`);
+  }
+  await _run('aws', ['ecr', 'create-repository', '--repository-name', ecr, '--region', region, ...prof], { dryRun });
 }
 module.exports = { buildImage, pushImage, buildDeps, ecrLogin, ensureRepo, _withRun };
