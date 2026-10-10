@@ -76,3 +76,65 @@ test('ensureRepo surfaces a denied describe instead of trying to create', async 
   await assert.rejects(docker.ensureRepo({ ecr: 'bs-x', region: 'us-east-2', profile: 'st-bs' }), /ecr:DescribeRepositories/);
   assert.deepEqual(calls, ['describe-repositories']);
 });
+
+// --- re-ship of a commit whose image is already in ECR (2026-10-10) ---
+// A second ship of the same commit used to re-push :<sha> with a NEW build, silently
+// changing what that tag means (bs-jobs-service:642d56c, Sept 2026). With ECR tag
+// immutability that push is rejected outright. Either way the right move is: keep the
+// image ECR already has, and point :latest at IT, not at the fresh local rebuild.
+const ECR_ARGS = { ecrUri: 'r/agent', ecr: 'agent', region: 'us-east-2', profile: 'st' };
+const NOT_FOUND = { code: 254, stdout: '', stderr: "An error occurred (ImageNotFoundException) when calling the DescribeImages operation: The image with imageId {imageTag:'abc'} does not exist" };
+const IMMUTABLE = "tag invalid: The image tag 'abc' already exists in the 'agent' repository and cannot be overwritten because the repository is immutable.";
+test('pushImage does not re-push a :<sha> tag that already exists in ECR', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push([c, args[1] || args[0]]); return { code: 0, stdout: '{}', stderr: '' }; });
+  await docker.pushImage({ ...ECR_ARGS, sha: 'abc' });
+  assert.deepEqual(calls, [['aws', 'describe-images']]);
+});
+test('pushImage pushes when ECR says the :<sha> tag does not exist', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push([c, ...args.slice(0, 2)]); return c === 'aws' ? NOT_FOUND : { code: 0 }; });
+  await docker.pushImage({ ...ECR_ARGS, sha: 'abc' });
+  assert.deepEqual(calls, [['aws', 'ecr', 'describe-images'], ['docker', 'push', 'r/agent:abc']]);
+});
+test('pushImage points :latest at the EXISTING image in ECR, not the local rebuild', async () => {
+  const calls = []; docker._withRun(async (c, args) => {
+    calls.push([c, args[1] || args[0]]);
+    if (args[1] === 'batch-get-image') return { code: 0, stdout: '{"manifest":1}\n', stderr: '' };
+    return { code: 0, stdout: '{}', stderr: '' };
+  });
+  await docker.pushImage({ ...ECR_ARGS, sha: 'abc', latest: true });
+  assert.deepEqual(calls, [['aws', 'describe-images'], ['aws', 'batch-get-image'], ['aws', 'put-image']]);
+});
+test('pushImage treats ":latest already points there" as success', async () => {
+  docker._withRun(async (c, args) => {
+    if (args[1] === 'put-image') return { code: 254, stdout: '', stderr: 'An error occurred (ImageAlreadyExistsException) when calling the PutImage operation: Image with digest sha256:x and tag latest already exists' };
+    if (args[1] === 'batch-get-image') return { code: 0, stdout: '{"manifest":1}', stderr: '' };
+    return { code: 0, stdout: '{}', stderr: '' };
+  });
+  await docker.pushImage({ ...ECR_ARGS, sha: 'abc', latest: true });
+});
+test('pushImage treats an immutable-tag rejection on push as "already in ECR"', async () => {
+  const calls = []; let described = 0;
+  docker._withRun(async (c, args) => {
+    calls.push([c, c === 'docker' ? args[0] : args[1]]);
+    if (c === 'aws' && args[1] === 'describe-images') { described += 1; return described === 1 ? NOT_FOUND : { code: 0, stdout: '{}', stderr: '' }; }
+    if (c === 'docker' && args[0] === 'push') throw new Error(`docker push r/agent:abc failed (exit 1)\n${IMMUTABLE}`);
+    return { code: 0 };
+  });
+  await docker.pushImage({ ...ECR_ARGS, sha: 'abc' });
+  assert.deepEqual(calls, [['aws', 'describe-images'], ['docker', 'push'], ['aws', 'describe-images']]);
+});
+test('pushImage still pushes a dirty build without asking ECR', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push([c, ...args]); return { code: 0 }; });
+  await docker.pushImage({ ...ECR_ARGS, sha: 'abc-dirty', latest: true });
+  assert.deepEqual(calls, [['docker', 'push', 'r/agent:abc-dirty']]);
+});
+test('pushImage surfaces a denied ECR lookup instead of pushing blind', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push(c); return { code: 254, stdout: '', stderr: 'An error occurred (AccessDeniedException) when calling the DescribeImages operation: not authorized to perform: ecr:DescribeImages' }; });
+  await assert.rejects(docker.pushImage({ ...ECR_ARGS, sha: 'abc' }), /ecr:DescribeImages/);
+  assert.deepEqual(calls, ['aws']);
+});
+test('pushImage on dry run prints the push without asking ECR', async () => {
+  const calls = []; docker._withRun(async (c, args) => { calls.push([c, ...args]); return { code: 0 }; });
+  await docker.pushImage({ ...ECR_ARGS, sha: 'abc', dryRun: true });
+  assert.deepEqual(calls, [['docker', 'push', 'r/agent:abc']]);
+});

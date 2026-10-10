@@ -189,3 +189,11 @@ test('an unreadable deployment does not trigger a rollback', async () => {
   await execute([{ kind: 'rollout', unit: _rolloutUnit() }], { deps: d });
   assert.ok(!log.includes('undo'), `rolled back on an unreadable deployment: ${log}`);
 });
+test('push step passes the ECR repo, region and profile so pushImage can check for an existing tag', async () => {
+  const log = []; const d = deps(log); let got;
+  d.docker.pushImage = async (a) => { got = a; };
+  const unit = { repo: 'sai', repoPath: '/x', image: { name: 'agent', ecr: 'bs-agent', source: { local: true } }, workload: 'agent', kind: 'deployment',
+    manifests: [], dependsOn: [], defaults: { context: 'c', namespace: 'n', platform: 'p', account: 'a', region: 'us-east-2', profile: 'st' }, repoUri: 'r/bs-agent', stamp: [] };
+  await execute([{ kind: 'push', unit }], { deps: d });
+  assert.equal(got.ecr, 'bs-agent'); assert.equal(got.region, 'us-east-2'); assert.equal(got.profile, 'st');
+});
