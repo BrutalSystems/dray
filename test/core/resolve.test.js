@@ -10,6 +10,16 @@ const globalDefaults = { account: '123', region: 'us-east-2', context: 'st-eks',
 test('imageVar derives UPPER_SNAKE _IMAGE', () => { assert.equal(imageVar({ name: 'sai-worker' }), 'SAI_WORKER_IMAGE'); });
 test('imageVar honors override', () => { assert.equal(imageVar({ name: 'x', templateVar: 'FOO' }), 'FOO'); });
 test('mergeDefaults layers', () => { assert.equal(mergeDefaults({ region: 'a' }, { defaults: { region: 'b' } }, {}).region, 'b'); });
+test('mergeDefaults drops profile in GitHub Actions, keeps it elsewhere', (t) => {
+  const prev = process.env.GITHUB_ACTIONS;
+  t.after(() => { if (prev === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = prev; });
+  const repo = { defaults: { profile: 'repo-prof', region: 'b' } };
+  delete process.env.GITHUB_ACTIONS;
+  assert.equal(mergeDefaults({ profile: 'g' }, repo, {}).profile, 'repo-prof');
+  process.env.GITHUB_ACTIONS = 'true';
+  const d = mergeDefaults({ profile: 'g' }, repo, { profile: 'w' });
+  assert.equal(d.profile, undefined); assert.equal(d.region, 'b');
+});
 test('resolveTargets repo:name builds unit with stamp + repoUri + _secrets', () => {
   const [u] = resolveTargets({ registry, globalDefaults, spec: 'sai:sai-api' });
   assert.equal(u.workload, 'sai-api'); assert.equal(u.kind, 'deployment');

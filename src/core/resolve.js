@@ -4,6 +4,10 @@ function imageVar(image) { return image.templateVar || `${upperSnake(image.name)
 function mergeDefaults(globalDefaults = {}, repoCfg = {}, entry = {}) {
   const repo = repoCfg.defaults || {}; const out = {};
   for (const k of KEYS) out[k] = entry[k] ?? repo[k] ?? globalDefaults[k];
+  // A profile names credentials on a person's machine. In GitHub Actions they come
+  // from OIDC as env vars and no named profile exists, so `--profile` would only make
+  // the aws CLI fail ("config profile ... could not be found").
+  if (process.env.GITHUB_ACTIONS === 'true') delete out.profile;
   return out;
 }
 function ecrRepoUri(defaults, image) { return `${defaults.account}.dkr.ecr.${defaults.region}.amazonaws.com/${image.ecr}`; }

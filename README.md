@@ -55,7 +55,8 @@ Global flags: `--dry-run` (print the plan, run nothing), `--allow-dirty`
   "name": "myrepo",
   // optional per-repo overrides of ~/.dray/config.json defaults
   // (profile, region, account, platform, context, namespace, ciGate);
-  // a workload may override them again.
+  // a workload may override them again. `profile` is ignored in GitHub Actions,
+  // where credentials come from OIDC env vars rather than a named profile.
   "defaults": { "namespace": "bs", "ciGate": true },
   "images": [
     { "name": "app", "ecr": "app", "source": { "local": true },
