@@ -216,6 +216,13 @@ func TestParseGoodDeploy(t *testing.T) {
 	}
 }
 
+func TestFeedEnvironment(t *testing.T) {
+	doc := "name: a\npilets:\n  names: [cart]\n  path: web/{name}\nenvironments:\n  dev: {release: feed, approval: none, feed: {url: \"https://f.example.com/api/pilet/publish/a-dev\", api_key: \"secret:a/feed#FEED_API_KEY\"}}\n"
+	if _, err := ParseRepoConfig([]byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeployProblems(t *testing.T) {
 	tg := "targets:\n  t: {cloud: aws, account: \"123456789012\", region: us-east-2, cluster: c}\n"
 	env := "environments:\n  prod: {target: t, namespace: a, release: gitops, approval: none}\n"
@@ -228,6 +235,10 @@ func TestDeployProblems(t *testing.T) {
 		"no cluster":           {"name: a\ntargets:\n  t: {cloud: aws, account: \"123456789012\", region: us-east-2}\n" + env, "name the Kubernetes cluster"},
 		"file store no dir":    {"name: a\nsecret_store: {type: file}\n", "name the folder"},
 		"store type":           {"name: a\nsecret_store: {type: s3}\n", `"s3" must be one of openbao, file`},
+		"feed without feed":    {"name: a\nenvironments:\n  dev: {release: feed, approval: none}\n", "needs a feed"},
+		"feed key without key": {"name: a\nenvironments:\n  dev: {release: feed, approval: none, feed: {url: \"https://f.example.com/p\", api_key: \"secret:a/feed\"}}\n", "name the key within the secret"},
+		"feed with namespace":  {"name: a\nenvironments:\n  dev: {release: feed, approval: none, namespace: a, feed: {url: \"https://f.example.com/p\", api_key: \"secret:a/feed#K\"}}\n", "no target or namespace"},
+		"feed bad url":         {"name: a\nenvironments:\n  dev: {release: feed, approval: none, feed: {url: \"ftp://x\", api_key: \"secret:a/feed#K\"}}\n", "not an http(s) URL"},
 		"credential field":     {"name: a\n" + "targets:\n  t: {cloud: aws, account: \"123456789012\", region: us-east-2, cluster: c, profile: me}\n", "unknown field"},
 	}
 	for name, tc := range cases {

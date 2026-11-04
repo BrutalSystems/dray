@@ -58,7 +58,9 @@ func (r *Repo) logf(format string, a ...any) {
 }
 
 // Commit is HEAD in short form (as the JS tool tagged images) and whether
-// the working tree has uncommitted changes, untracked files included.
+// the app's folder has uncommitted changes, untracked files included. Only
+// Dir counts: for an app in a subfolder of a monorepo, changes elsewhere in
+// the repo are not part of what gets built.
 func (r *Repo) Commit(ctx context.Context) (string, bool, error) {
 	head, err := r.git(ctx, r.Dir, "rev-parse", "HEAD")
 	if err != nil {
@@ -68,7 +70,7 @@ func (r *Repo) Commit(ctx context.Context) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	status, err := r.git(ctx, r.Dir, "status", "--porcelain")
+	status, err := r.git(ctx, r.Dir, "status", "--porcelain", "--", ".")
 	if err != nil {
 		return "", false, err
 	}

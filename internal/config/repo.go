@@ -152,13 +152,22 @@ type Secret struct {
 	From SecretRef `json:"from"`
 }
 
-// Pilets are Piral micro-frontends published from this repo.
+// Pilets are Piral micro-frontends published from this repo. Dray builds
+// each one with the repo's own build, packs it with the pilet CLI, stamps the
+// version and uploads it to the environment's feed (dray publish).
 type Pilets struct {
 	// Names are the pilets this repo publishes.
 	Names []string `json:"names" jsonschema:"minItems=1"`
-	// Command publishes one pilet; "{name}" is replaced with the pilet's name.
-	Command []string `json:"command" jsonschema:"minItems=1"`
-	// Env is passed to the command as environment variables, such as the feed key.
+	// Path is each pilet's folder, relative to the repo root; "{name}" is
+	// replaced with the pilet's name. Defaults to packages/{name}.
+	Path string `json:"path,omitempty"`
+	// Build builds one pilet, run in its folder; "{name}" is replaced.
+	// Defaults to npx --no-install pilet build.
+	Build []string `json:"build,omitempty"`
+	// Command, when set, publishes one pilet the repo's own way instead
+	// ("{name}" is replaced): the JS tool's behavior, kept as an escape hatch.
+	Command []string `json:"command,omitempty"`
+	// Env is passed to Command as environment variables, such as the feed key.
 	Env SecretRef `json:"env,omitempty"`
 }
 

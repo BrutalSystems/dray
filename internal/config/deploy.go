@@ -1,11 +1,14 @@
 package config
 
-// Environment is one place the app deploys to.
+// Environment is one place the app deploys to: a namespace on a cluster, or
+// for release: feed, a pilet feed.
 type Environment struct {
 	// Target names an entry in targets: the cluster and cloud account.
-	Target string `json:"target"`
+	Target string `json:"target,omitempty"`
 	// Namespace is the Kubernetes namespace.
-	Namespace string `json:"namespace" jsonschema:"pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$,maxLength=63"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$,maxLength=63"`
+	// Feed is where pilets are published, for release: feed.
+	Feed *Feed `json:"feed,omitempty"`
 	// NamespaceMode is owned (the default: Dray labels the namespace as this
 	// app's and refuses other apps there) or shared with other apps, which
 	// then may change only resources they own.
@@ -71,4 +74,18 @@ type OpenBaoStore struct {
 type FileStore struct {
 	// Dir holds the files; a leading ~/ is the home folder.
 	Dir string `json:"dir"`
+}
+
+// Feed is a Piral feed service that pilets are published to.
+type Feed struct {
+	// URL is the feed's publish endpoint, such as
+	// https://feed.example.com/api/pilet/publish/shop-dev.
+	URL string `json:"url"`
+	// APIKey is the publish key in the secret store, one key of a secret:
+	// secret:<app>/<name>#<KEY>.
+	APIKey SecretRef `json:"api_key"`
+	// Version is how a published pilet is versioned: commit (the default)
+	// publishes <package version>-<environment>.<commit>, so every commit is a
+	// new version; package publishes the version in package.json as it is.
+	Version string `json:"version,omitempty" jsonschema:"enum=commit,enum=package"`
 }

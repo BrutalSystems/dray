@@ -75,3 +75,23 @@ func TestNeedsStore(t *testing.T) {
 		t.Error("b named, and it uses a secret")
 	}
 }
+
+func TestPickFeedEnv(t *testing.T) {
+	c, err := config.ParseRepoConfig([]byte(`name: shop
+pilets: {names: [cart]}
+targets:
+  t1: {cloud: aws, account: "123456789012", region: us-east-2, cluster: c1}
+environments:
+  prod: {target: t1, namespace: shop, release: direct, approval: none}
+  feed-dev: {release: feed, approval: none, feed: {url: "https://f.example.com/p", api_key: "secret:shop/feed#K"}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _, err := pickFeedEnv(c, ""); err != nil || n != "feed-dev" {
+		t.Errorf("the only feed environment: %s %v", n, err)
+	}
+	if _, _, err := pickFeedEnv(c, "prod"); err == nil {
+		t.Error("a cluster environment was taken as a feed")
+	}
+}

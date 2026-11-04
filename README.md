@@ -123,6 +123,31 @@ sources beside it (never the working tree), and referenced by digest. An image
 the registry already holds for the commit is reused. A rollout is undone only
 when Kubernetes reports it failed.
 
+## Publishing pilets
+
+`dray publish` builds a repo's pilets, packs them with the pilet CLI and
+uploads them to the feed of a `release: feed` environment:
+
+```yaml
+pilets:
+  names: [cart, checkout]
+  path: packages/pilet-{name}          # default packages/{name}
+  build: [yarn, build:pilet]           # run in the pilet's folder; default npx pilet build
+environments:
+  dev:
+    release: feed
+    approval: none
+    feed:
+      url: https://feed.example.com/api/pilet/publish/shop-dev
+      api_key: secret:shop/feed#FEED_API_KEY
+      version: commit                  # default: 1.2.0 becomes 1.2.0-dev.<commit>; or package
+```
+
+```bash
+dray publish --dry-run --pilet cart    # build and pack only
+dray publish --env dev
+```
+
 ## License
 
 MIT

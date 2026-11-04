@@ -72,6 +72,10 @@
           "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
           "description": "Namespace is the Kubernetes namespace."
         },
+        "feed": {
+          "$ref": "#/$defs/Feed",
+          "description": "Feed is where pilets are published, for release: feed."
+        },
         "namespace_mode": {
           "type": "string",
           "enum": [
@@ -122,12 +126,37 @@
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "target",
-        "namespace",
         "release",
         "approval"
       ],
-      "description": "Environment is one place the app deploys to."
+      "description": "Environment is one place the app deploys to: a namespace on a cluster, or for release: feed, a pilet feed."
+    },
+    "Feed": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL is the feed's publish endpoint, such as\nhttps://feed.example.com/api/pilet/publish/shop-dev."
+        },
+        "api_key": {
+          "$ref": "#/$defs/SecretRef",
+          "description": "APIKey is the publish key in the secret store, one key of a secret:\nsecret:\u003capp\u003e/\u003cname\u003e#\u003cKEY\u003e."
+        },
+        "version": {
+          "type": "string",
+          "enum": [
+            "commit",
+            "package"
+          ],
+          "description": "Version is how a published pilet is versioned: commit (the default)\npublishes \u003cpackage version\u003e-\u003cenvironment\u003e.\u003ccommit\u003e, so every commit is a\nnew version; package publishes the version in package.json as it is."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url",
+        "api_key"
+      ],
+      "description": "Feed is a Piral feed service that pilets are published to."
     },
     "FileStore": {
       "properties": {
@@ -227,24 +256,33 @@
           "minItems": 1,
           "description": "Names are the pilets this repo publishes."
         },
+        "path": {
+          "type": "string",
+          "description": "Path is each pilet's folder, relative to the repo root; \"{name}\" is\nreplaced with the pilet's name. Defaults to packages/{name}."
+        },
+        "build": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Build builds one pilet, run in its folder; \"{name}\" is replaced.\nDefaults to npx --no-install pilet build."
+        },
         "command": {
           "items": {
             "type": "string"
           },
           "type": "array",
-          "minItems": 1,
-          "description": "Command publishes one pilet; \"{name}\" is replaced with the pilet's name."
+          "description": "Command, when set, publishes one pilet the repo's own way instead\n(\"{name}\" is replaced): the JS tool's behavior, kept as an escape hatch."
         },
         "env": {
           "$ref": "#/$defs/SecretRef",
-          "description": "Env is passed to the command as environment variables, such as the feed key."
+          "description": "Env is passed to Command as environment variables, such as the feed key."
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "names",
-        "command"
+        "names"
       ],
       "description": "Pilets are Piral micro-frontends published from this repo."
     },

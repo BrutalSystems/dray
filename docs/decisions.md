@@ -208,6 +208,21 @@ and a cluster to their kube context. The list of apps is the repos with a
 `.dray/config.yaml`. Shared components keep their pin in the app's `uses`,
 with the repository their images live in.
 
+## D21 · Dray publishes pilets itself; commit versions for dev feeds
+
+`dray publish` builds each pilet with the repo's own build, packs it with the
+pilet CLI, rewrites the version inside the package, and uploads it to the
+feed of a `release: feed` environment with the key from the secret store. A
+feed environment's `version: commit` (the default) publishes `1.2.0` as
+`1.2.0-<env>.<commit>`, so every commit is a distinct, immutable version and
+nobody bumps package.json for a dev publish; `version: package` publishes the
+package.json version for production feeds. The repo's own publish command
+stays available as `pilets.command`, the JS tool's behavior. Feeds that never
+serve prerelease versions unless pinned need a pin or `version: package`.
+
+Uncommitted changes count only inside the app's own folder, so an app in a
+subfolder of a monorepo is not blocked by changes elsewhere in the repo.
+
 ## D12 · Scope kept for later phases
 
 Preview environments per pull request, release groups for services that ship

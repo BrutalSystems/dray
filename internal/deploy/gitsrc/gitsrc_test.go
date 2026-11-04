@@ -138,3 +138,21 @@ func TestExtractRefusesEscapes(t *testing.T) {
 		t.Error("a file was written through a symlink")
 	}
 }
+
+// In a monorepo, only changes in the app's own folder make it dirty.
+func TestDirtyIsScopedToTheAppFolder(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	repo := filepath.Join(t.TempDir(), "mono")
+	newRepo(t, repo, map[string]string{"web/package.json": "{}", "backend/app.cs": "x"})
+	write(t, filepath.Join(repo, "backend", "bin", "out.dll"), "build output")
+	r := &Repo{Dir: filepath.Join(repo, "web"), Folder: "mono"}
+	if _, dirty, err := r.Commit(context.Background()); err != nil || dirty {
+		t.Fatalf("changes outside web made it dirty: %v %v", dirty, err)
+	}
+	write(t, filepath.Join(repo, "web", "new.ts"), "x")
+	if _, dirty, _ := r.Commit(context.Background()); !dirty {
+		t.Error("an untracked file in web was not seen")
+	}
+}

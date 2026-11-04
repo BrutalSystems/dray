@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"path"
 	"regexp"
 	"sort"
@@ -200,8 +201,16 @@ func (c *RepoConfig) Validate() error {
 		if len(pl.Names) == 0 {
 			p.addf("pilets.names", "list at least one pilet")
 		}
-		if len(pl.Command) == 0 {
-			p.addf("pilets.command", "give the command that publishes one pilet")
+		for i, n := range pl.Names {
+			if !dnsLabel.MatchString(n) {
+				p.addf(fmt.Sprintf("pilets.names[%d]", i), "%q must be lowercase letters, digits and dashes", n)
+			}
+		}
+		if pl.Path != "" {
+			checkRepoPath(&p, "pilets.path", strings.ReplaceAll(pl.Path, "{name}", "x"))
+		}
+		if pl.Env != "" && len(pl.Command) == 0 {
+			p.addf("pilets.env", "env is passed to command; without a command the key comes from the environment's feed")
 		}
 		if pl.Env != "" {
 			if err := pl.Env.Validate(); err != nil {
@@ -340,11 +349,18 @@ func (c *RepoConfig) checkDeploy(p *problems) {
 		if !dnsLabel.MatchString(n) {
 			p.addf(where, "environment names are lowercase letters, digits and dashes")
 		}
-		if _, ok := c.Targets[env.Target]; !ok {
-			p.addf(where+".target", "%q is not in targets", env.Target)
-		}
-		if !dnsLabel.MatchString(env.Namespace) || len(env.Namespace) > 63 {
-			p.addf(where+".namespace", "%q is not a valid namespace", env.Namespace)
+		if env.Release == "feed" {
+			checkFeed(p, where, env)
+		} else {
+			if _, ok := c.Targets[env.Target]; !ok {
+				p.addf(where+".target", "%q is not in targets", env.Target)
+			}
+			if !dnsLabel.MatchString(env.Namespace) || len(env.Namespace) > 63 {
+				p.addf(where+".namespace", "%q is not a valid namespace", env.Namespace)
+			}
+			if env.Feed != nil {
+				p.addf(where+".feed", "only a release: feed environment has a feed")
+			}
 		}
 		oneOf(p, where+".namespace_mode", env.NamespaceMode, true, "owned", "shared")
 		oneOf(p, where+".release", env.Release, false, "direct", "gitops", "feed")
@@ -386,6 +402,26 @@ func (c *RepoConfig) checkDeploy(p *problems) {
 				p.addf("secret_store.openbao", "the store is file; remove openbao")
 			}
 		}
+	}
+}
+
+func checkFeed(p *problems, where string, env Environment) {
+	f := env.Feed
+	if f == nil {
+		p.addf(where+".feed", "a release: feed environment needs a feed (url and api_key)")
+		return
+	}
+	if u, err := url.Parse(f.URL); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {
+		p.addf(where+".feed.url", "%q is not an http(s) URL", f.URL)
+	}
+	if err := f.APIKey.Validate(); err != nil {
+		p.addf(where+".feed.api_key", "%v", err)
+	} else if !strings.Contains(string(f.APIKey), "#") {
+		p.addf(where+".feed.api_key", "name the key within the secret: %s#<KEY>", f.APIKey)
+	}
+	oneOf(p, where+".feed.version", f.Version, true, "commit", "package")
+	if env.Target != "" || env.Namespace != "" {
+		p.addf(where, "a release: feed environment has no target or namespace")
 	}
 }
 
