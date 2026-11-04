@@ -109,6 +109,8 @@ type state struct {
 	problems []string
 	// before is each Deployment's state just before the apply.
 	before map[string]DeploymentState
+	// claim is set when the namespace must be created or labeled as this app's.
+	claim bool
 }
 
 // problem stops a real deploy; a dry run reports it and goes on.
@@ -135,7 +137,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	s := &state{o: o, secrets: map[string][]byte{}, changed: map[string]bool{}, docs: map[string][]byte{}, before: map[string]DeploymentState{}}
 	steps := []func(context.Context) error{
-		s.selectWorkloads, s.checkSource, s.gate, s.planImages, s.readSecrets,
+		s.selectWorkloads, s.checkSource, s.gate, s.checkNamespace, s.planImages, s.readSecrets,
 	}
 	if !o.DryRun {
 		steps = append(steps, s.build)
@@ -550,7 +552,41 @@ func sortedKeys[V any](m map[string]V) []string {
 	return out
 }
 
+// checkNamespace enforces one owner per namespace. An owned namespace (the
+// default) is labeled with the app on its first deploy; a namespace labeled
+// for another app is refused, whatever the mode.
+func (s *state) checkNamespace(ctx context.Context) error {
+	ns := s.o.Env.Namespace
+	st, err := s.o.Cluster.ReadNamespace(ctx)
+	if err != nil {
+		return err
+	}
+	app := s.o.Repo.Name
+	if st.Owner != "" && st.Owner != app {
+		return fmt.Errorf("namespace %s belongs to app %s (label %s); %s cannot deploy there", ns, st.Owner, OwnerLabel, app)
+	}
+	shared := s.o.Env.NamespaceMode == "shared"
+	switch {
+	case shared && !st.Exists:
+		return s.problem(fmt.Errorf("shared namespace %s does not exist; Dray creates only namespaces an app owns", ns))
+	case shared, st.Owner == app:
+	case !st.Exists:
+		s.claim = true
+		s.printf("namespace %s: does not exist; it will be created for %s", ns, app)
+	default:
+		s.claim = true
+		s.printf("namespace %s: not claimed yet; it will be labeled %s=%s", ns, OwnerLabel, app)
+	}
+	return nil
+}
+
 func (s *state) apply(ctx context.Context) error {
+	if s.claim {
+		if err := s.o.Cluster.Claim(ctx, s.o.Repo.Name); err != nil {
+			return fmt.Errorf("claiming namespace %s: %w", s.o.Env.Namespace, err)
+		}
+		s.printf("claimed namespace %s for %s", s.o.Env.Namespace, s.o.Repo.Name)
+	}
 	// Note each Deployment's generation before anything is applied: the
 	// rollout step compares against it to tell whether the apply itself
 	// started a rollout.

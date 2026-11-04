@@ -41,18 +41,6 @@ func LoadRepoConfig(repoDir string) (*RepoConfig, error) {
 	return c, nil
 }
 
-// ParseRegistryEntry reads a registry entry strictly and checks it.
-func ParseRegistryEntry(data []byte) (*RegistryEntry, error) {
-	var e RegistryEntry
-	if err := strictUnmarshal(data, &e); err != nil {
-		return nil, err
-	}
-	if err := e.Validate(); err != nil {
-		return nil, err
-	}
-	return &e, nil
-}
-
 func strictUnmarshal(data []byte, v any) error {
 	if strings.TrimSpace(string(data)) == "" {
 		return errors.New("the file is empty")
@@ -61,16 +49,4 @@ func strictUnmarshal(data []byte, v any) error {
 		return fmt.Errorf("cannot read config: %w", err)
 	}
 	return nil
-}
-
-// ParseTarget reads a target strictly and checks it.
-func ParseTarget(data []byte) (*Target, error) {
-	var t Target
-	if err := strictUnmarshal(data, &t); err != nil {
-		return nil, err
-	}
-	if err := t.Validate(); err != nil {
-		return nil, err
-	}
-	return &t, nil
 }

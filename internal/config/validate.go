@@ -209,6 +209,7 @@ func (c *RepoConfig) Validate() error {
 			}
 		}
 	}
+	c.checkDeploy(&p)
 	return p.err()
 }
 
@@ -281,82 +282,6 @@ func findCycle(ws []Workload) string {
 	return ""
 }
 
-// Validate checks a registry entry.
-func (e *RegistryEntry) Validate() error {
-	var p problems
-	if !dnsLabel.MatchString(e.Name) || len(e.Name) > 63 {
-		p.addf("name", "%q must be lowercase letters, digits and dashes, at most 63 characters", e.Name)
-	}
-	if !repoSlug.MatchString(e.Repo) {
-		p.addf("repo", "%q must be owner/name", e.Repo)
-	}
-	checkRepoPath(&p, "path", e.Path)
-	for i, t := range e.ThirdParty {
-		if !imageRef.MatchString(t) {
-			p.addf(fmt.Sprintf("third_party[%d]", i), "%q must be an image without tag or digest, such as docker.io/library/postgres", t)
-		}
-	}
-	switch e.EffectiveKind() {
-	case KindApp:
-		if e.ReleaseOn != "" {
-			p.addf("release_on", "only components have release_on")
-		}
-		if len(e.Environments) == 0 {
-			p.addf("environments", "an app needs at least one environment")
-		}
-	case KindComponent:
-		if e.ReleaseOn != "tag" {
-			p.addf("release_on", "a component must set release_on: tag")
-		}
-		if len(e.Environments) != 0 {
-			p.addf("environments", "a component never deploys on its own; apps pin it with uses")
-		}
-	default:
-		p.addf("kind", "%q must be app or component", e.Kind)
-	}
-
-	envNames := make([]string, 0, len(e.Environments))
-	for n := range e.Environments {
-		envNames = append(envNames, n)
-	}
-	sort.Strings(envNames)
-	for _, n := range envNames {
-		env := e.Environments[n]
-		where := "environments." + n
-		if !dnsLabel.MatchString(n) {
-			p.addf(where, "environment names are lowercase letters, digits and dashes")
-		}
-		if env.Target == "" {
-			p.addf(where+".target", "name the target cluster")
-		}
-		if !dnsLabel.MatchString(env.Namespace) || len(env.Namespace) > 63 {
-			p.addf(where+".namespace", "%q is not a valid namespace", env.Namespace)
-		}
-		oneOf(&p, where+".namespace_mode", env.NamespaceMode, true, "owned", "shared")
-		oneOf(&p, where+".release", env.Release, false, "direct", "gitops", "feed")
-		oneOf(&p, where+".approval", env.Approval, false, "none", "passkey", "chat")
-		oneOf(&p, where+".on_merge", env.OnMerge, true, "off", "deploy")
-		if env.PromoteFrom != "" {
-			if env.PromoteFrom == n {
-				p.addf(where+".promote_from", "an environment cannot promote from itself")
-			} else if _, ok := e.Environments[env.PromoteFrom]; !ok {
-				p.addf(where+".promote_from", "unknown environment %q", env.PromoteFrom)
-			}
-		}
-	}
-	for _, n := range envNames {
-		seen := map[string]bool{n: true}
-		for cur := e.Environments[n].PromoteFrom; cur != ""; cur = e.Environments[cur].PromoteFrom {
-			if seen[cur] {
-				p.addf("environments."+n+".promote_from", "promotion forms a loop through %q", cur)
-				break
-			}
-			seen[cur] = true
-		}
-	}
-	return p.err()
-}
-
 func oneOf(p *problems, where, v string, optional bool, allowed ...string) {
 	if v == "" && optional {
 		return
@@ -375,26 +300,100 @@ var (
 	platform  = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$`)
 )
 
-// Validate checks a target.
-func (t *Target) Validate() error {
-	var p problems
-	if !dnsLabel.MatchString(t.Name) {
-		p.addf("name", "%q must be lowercase letters, digits and dashes", t.Name)
-	}
-	oneOf(&p, "cloud", t.Cloud, false, "aws")
+// checkTarget checks one target.
+func checkTarget(p *problems, where string, t Target) {
+	oneOf(p, where+".cloud", t.Cloud, false, "aws")
 	if t.Cloud == "aws" {
 		if !accountID.MatchString(t.Account) {
-			p.addf("account", "%q is not a 12-digit AWS account ID", t.Account)
+			p.addf(where+".account", "%q is not a 12-digit AWS account ID", t.Account)
 		}
 		if !regionRE.MatchString(t.Region) {
-			p.addf("region", "%q is not a region such as us-east-2", t.Region)
+			p.addf(where+".region", "%q is not a region such as us-east-2", t.Region)
 		}
 	}
 	if t.Cluster == "" {
-		p.addf("cluster", "name the Kubernetes context")
+		p.addf(where+".cluster", "name the Kubernetes cluster")
 	}
 	if t.Platform != "" && !platform.MatchString(t.Platform) {
-		p.addf("platform", "%q is not a platform such as linux/arm64", t.Platform)
+		p.addf(where+".platform", "%q is not a platform such as linux/arm64", t.Platform)
 	}
-	return p.err()
+}
+
+// checkDeploy checks where the app deploys: environments, targets, the
+// secret store and the third-party images.
+func (c *RepoConfig) checkDeploy(p *problems) {
+	for i, t := range c.ThirdParty {
+		if !imageRef.MatchString(t) {
+			p.addf(fmt.Sprintf("third_party[%d]", i), "%q must be an image without tag or digest, such as docker.io/library/postgres", t)
+		}
+	}
+	for _, n := range sortedNames(c.Targets) {
+		if !dnsLabel.MatchString(n) {
+			p.addf("targets."+n, "target names are lowercase letters, digits and dashes")
+		}
+		checkTarget(p, "targets."+n, c.Targets[n])
+	}
+	envNames := sortedNames(c.Environments)
+	for _, n := range envNames {
+		env := c.Environments[n]
+		where := "environments." + n
+		if !dnsLabel.MatchString(n) {
+			p.addf(where, "environment names are lowercase letters, digits and dashes")
+		}
+		if _, ok := c.Targets[env.Target]; !ok {
+			p.addf(where+".target", "%q is not in targets", env.Target)
+		}
+		if !dnsLabel.MatchString(env.Namespace) || len(env.Namespace) > 63 {
+			p.addf(where+".namespace", "%q is not a valid namespace", env.Namespace)
+		}
+		oneOf(p, where+".namespace_mode", env.NamespaceMode, true, "owned", "shared")
+		oneOf(p, where+".release", env.Release, false, "direct", "gitops", "feed")
+		oneOf(p, where+".approval", env.Approval, false, "none", "passkey", "chat")
+		oneOf(p, where+".on_merge", env.OnMerge, true, "off", "deploy")
+		if env.PromoteFrom != "" {
+			if env.PromoteFrom == n {
+				p.addf(where+".promote_from", "an environment cannot promote from itself")
+			} else if _, ok := c.Environments[env.PromoteFrom]; !ok {
+				p.addf(where+".promote_from", "unknown environment %q", env.PromoteFrom)
+			}
+		}
+	}
+	for _, n := range envNames {
+		seen := map[string]bool{n: true}
+		for cur := c.Environments[n].PromoteFrom; cur != ""; cur = c.Environments[cur].PromoteFrom {
+			if seen[cur] {
+				p.addf("environments."+n+".promote_from", "promotion forms a loop through %q", cur)
+				break
+			}
+			seen[cur] = true
+		}
+	}
+	if st := c.SecretStore; st != nil {
+		oneOf(p, "secret_store.type", st.Type, false, "openbao", "file")
+		switch st.Type {
+		case "openbao":
+			if st.File != nil {
+				p.addf("secret_store.file", "the store is openbao; remove file")
+			}
+			if o := st.OpenBao; o != nil && o.Client != "" && !dnsLabel.MatchString(o.Client) {
+				p.addf("secret_store.openbao.client", "%q must be lowercase letters, digits and dashes", o.Client)
+			}
+		case "file":
+			if st.File == nil || st.File.Dir == "" {
+				p.addf("secret_store.file.dir", "name the folder")
+			}
+			if st.OpenBao != nil {
+				p.addf("secret_store.openbao", "the store is file; remove openbao")
+			}
+		}
+	}
+}
+
+func sortedNames[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

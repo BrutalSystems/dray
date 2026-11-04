@@ -57,7 +57,7 @@ func TestMigrateFindsSiblingRepo(t *testing.T) {
 
 	files := map[string]string{
 		filepath.Join(app, "Dockerfile"): "FROM scratch\nCOPY lib/Lib.csproj lib/\nCOPY app/ app/\n",
-		filepath.Join(app, ".dray", "config.json"): `{"name":"app","defaults":{"namespace":"team","context":"main"},
+		filepath.Join(app, ".dray", "config.json"): `{"name":"app","defaults":{"namespace":"team","context":"main","account":"123456789012","region":"us-east-2"},
 		  "images":[{"name":"app","ecr":"app","source":{"local":true},"dockerfile":"Dockerfile","context":".."}],
 		  "workloads":[{"name":"app","kind":"deployment","image":"app","manifests":["k8s/app.yaml"]}]}`,
 	}
@@ -66,7 +66,7 @@ func TestMigrateFindsSiblingRepo(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := runConfig(t, "config", "migrate", app, "--write", "--repo", "example/app", "--machine-config", filepath.Join(parent, "none.json")); err != nil {
+	if _, err := runConfig(t, "config", "migrate", app, "--write", "--machine-config", filepath.Join(parent, "none.json")); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(filepath.Join(app, ".dray", "config.yaml")) //nolint:gosec // test file

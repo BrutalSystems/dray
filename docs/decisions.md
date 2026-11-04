@@ -31,7 +31,7 @@ approves on its own.
 
 ## D5 · The secret store is swappable; OpenBao is the default
 
-Core depends on a `Store` interface. Repos and registry entries use logical
+Core depends on a `Store` interface. Repos use logical
 `secret:<scope>/<name>` references, never store paths. Adapters: `openbao`
 (default), `aws-secrets-manager`, `file`, `sops` (read-only, migration). Core
 features never require dynamic credentials.
@@ -110,7 +110,7 @@ runs today.
 
 ## D15 · Shared namespaces are allowed, with an ownership rule; new apps get their own
 
-An app migrated from the JS tool keeps its namespace, which the registry
+An app migrated from the JS tool keeps its namespace, which its config
 marks `shared`. Dray stamps every resource with its owning app, and a Kyverno
 rule lets an app change only resources it owns. Requests and limits are
 required so one app cannot starve its neighbours, and network rules select
@@ -120,8 +120,8 @@ one at a time, stateless ones first.
 ## D16 · Deploy-on-merge is driven by Dray, off by default
 
 Dray's GitHub App receives repository events. When CI finishes green on the
-main branch, Dray plans and applies to every environment whose registry entry
-sets `on_merge: deploy`; the finished run is the CI gate. For an environment
+main branch, Dray plans and applies to every environment whose config sets
+`on_merge: deploy`; the finished run is the CI gate. For an environment
 that needs approval, on-merge only opens the approval request. GitHub
 workflows need no deploy step and hold no deploy credentials. Pilets can
 publish when their version changes the same way.
@@ -135,7 +135,7 @@ workflow switches by changing only its install step. Each repo then moves to
 
 ## D17 · Third-party images are mirrored into the cluster's registry by digest
 
-The registry lists approved upstream images. When a manifest names one by
+The app's config lists approved upstream images (`third_party`). When a manifest names one by
 tag, Dray resolves the tag to a digest, copies that image into the target's
 container registry once, and rewrites the manifest to the mirrored digest;
 the plan shows the rewrite. The policy stays absolute: every image that runs
@@ -164,7 +164,7 @@ changes these on purpose:
 - Images are built from the commit exported into a fresh folder, with each
   build source at its pinned commit beside it, not from the working tree and
   whatever happens to sit next to it. Uncommitted changes deploy only with
-  `--allow-dirty`, and only to an environment whose registry entry sets
+  `--allow-dirty`, and only to an environment whose config sets
   `allow_dirty`. A context of `..` is that build folder, holding the repo's
   checkout (named after its repository) and its sources, if any; it needs no
   sources of its own.
@@ -183,6 +183,30 @@ changes these on purpose:
   tag of its own, since registries keep tags immutable.
 - Dry runs ask the cluster what would change and report every problem a real
   deploy would stop on, instead of printing the commands they would run.
+
+## D20 · No separate registry: an app's repo holds everything it needs to deploy
+
+This reopens the registry, the per-app file outside the repo that said where
+an app may deploy and who approves. Everything about an app is now in its
+repo's `.dray/config.yaml`: environments, the targets they name, the secret
+store, and third-party images. Anyone who clones the repo and has Dray and the
+access can deploy it. The registry was there so a change in the repo could not
+send the app somewhere else; that is now kept by:
+
+- Dray reads where an app may deploy from the main branch only, never from the
+  branch being deployed.
+- Changes to `.dray/` need the owner's review (CODEOWNERS on a protected main).
+- Dray's own settings can require approval for an environment; a repo can ask
+  for more, never less.
+- One owner per namespace: Dray labels a namespace it creates or first deploys
+  to with the app (`dray/app`), and refuses any other app there. A namespace
+  marked `shared` is not claimed.
+
+Credentials are never in a repo. A person's own settings
+(`~/.config/dray/config.yaml`, optional) map an account to their AWS profile
+and a cluster to their kube context. The list of apps is the repos with a
+`.dray/config.yaml`. Shared components keep their pin in the app's `uses`,
+with the repository their images live in.
 
 ## D12 · Scope kept for later phases
 

@@ -41,11 +41,11 @@ const legacyRepo = `{
 
 func TestMigrateDryRunWritesNothing(t *testing.T) {
 	dir := writeRepo(t, legacyRepo)
-	out, err := runConfig(t, "config", "migrate", dir, "--repo", "example/shop", "--machine-config", filepath.Join(dir, "none.json"))
+	out, err := runConfig(t, "config", "migrate", dir, "--machine-config", filepath.Join(dir, "none.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "name: shop") || !strings.Contains(out, "repo: example/shop") {
+	if !strings.Contains(out, "name: shop") || !strings.Contains(out, "environments:\n  prod:") {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".dray", "config.yaml")); !os.IsNotExist(err) {
@@ -55,7 +55,7 @@ func TestMigrateDryRunWritesNothing(t *testing.T) {
 
 func TestMigrateWriteThenValidate(t *testing.T) {
 	dir := writeRepo(t, legacyRepo)
-	if _, err := runConfig(t, "config", "migrate", dir, "--write", "--repo", "example/shop", "--machine-config", filepath.Join(dir, "none.json")); err != nil {
+	if _, err := runConfig(t, "config", "migrate", dir, "--write", "--machine-config", filepath.Join(dir, "none.json")); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runConfig(t, "config", "validate", dir)
@@ -70,17 +70,15 @@ func TestMigrateWriteThenValidate(t *testing.T) {
 func TestMigrateRefusesToWriteAnInvalidResult(t *testing.T) {
 	dir := writeRepo(t, `{"name":"shop","images":[{"name":"api","ecr":"api","source":{"local":true},"context":"../.."}],
 	  "workloads":[{"name":"api","kind":"deployment","image":"api","manifests":["a.yaml"]}]}`)
-	_, err := runConfig(t, "config", "migrate", dir, "--write", "--repo", "example/shop", "--machine-config", filepath.Join(dir, "none.json"))
+	_, err := runConfig(t, "config", "migrate", dir, "--write", "--machine-config", filepath.Join(dir, "none.json"))
 	if err == nil || !strings.Contains(err.Error(), "not written") {
 		t.Fatalf("want a refusal, got %v", err)
 	}
 }
 
 func TestSchemaCommand(t *testing.T) {
-	for _, which := range []string{"config", "registry"} {
-		out, err := runConfig(t, "config", "schema", which)
-		if err != nil || !strings.Contains(out, `"$schema"`) {
-			t.Errorf("schema %s: err=%v out=%.80s", which, err, out)
-		}
+	out, err := runConfig(t, "config", "schema")
+	if err != nil || !strings.Contains(out, `"$schema"`) {
+		t.Errorf("schema: err=%v out=%.80s", err, out)
 	}
 }

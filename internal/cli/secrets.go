@@ -3,106 +3,22 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"sigs.k8s.io/yaml"
 
 	"github.com/BrutalSystems/dray/internal/config/legacy"
 	"github.com/BrutalSystems/dray/internal/secrets"
 	"github.com/BrutalSystems/dray/internal/secrets/sops"
-	"github.com/BrutalSystems/dray/internal/secrets/stores"
 )
-
-// UserConfig is the CLI's own settings file: deployment settings that never
-// belong in a repo, such as which secret store to use.
-type UserConfig struct {
-	SecretStore stores.Config `json:"secret_store"`
-	// Registry is the folder holding registry entries (<app>.yaml) and
-	// targets (targets/<name>.yaml); default "registry" beside this file.
-	Registry string `json:"registry,omitempty"`
-}
-
-// UserConfigPath is $DRAY_CONFIG, else $XDG_CONFIG_HOME/dray/config.yaml,
-// else ~/.config/dray/config.yaml.
-func UserConfigPath() string {
-	if p := os.Getenv("DRAY_CONFIG"); p != "" {
-		return p
-	}
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "dray", "config.yaml")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".config", "dray", "config.yaml")
-	}
-	return filepath.Join(home, ".config", "dray", "config.yaml")
-}
-
-const userConfigExample = `secret_store:
-  type: openbao          # or file
-  openbao:
-    address: https://bao.example.com   # default: BAO_ADDR, then VAULT_ADDR
-    mount: kv
-    layout: "{client}/{app}/{env}/{name}"   # default: {app}/{name}
-    clients:
-      shop: acme
-  # file:
-  #   dir: ~/.local/share/dray/secrets
-registry: ~/.config/dray/registry       # <app>.yaml and targets/<name>.yaml`
-
-// loadUserConfig reads Dray's config file and returns it with its path.
-func loadUserConfig(path string) (*UserConfig, string, error) {
-	if path == "" {
-		path = UserConfigPath()
-	}
-	data, err := os.ReadFile(path) //nolint:gosec // the user's own config file
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, path, fmt.Errorf("no Dray config: create %s, for example:\n\n%s", path, userConfigExample)
-	}
-	if err != nil {
-		return nil, path, err
-	}
-	var c UserConfig
-	if err := yaml.UnmarshalStrict(data, &c); err != nil {
-		return nil, path, fmt.Errorf("%s: %w", path, err)
-	}
-	return &c, path, nil
-}
-
-func openStore(path, env string) (secrets.Store, error) {
-	c, path, err := loadUserConfig(path)
-	if err != nil {
-		return nil, err
-	}
-	s, err := stores.Open(c.SecretStore, env)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return s, nil
-}
-
-// expandHome turns a leading ~/ into the home folder.
-func expandHome(p string) (string, error) {
-	rest, ok := strings.CutPrefix(p, "~/")
-	if !ok {
-		return p, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, rest), nil
-}
 
 // NewSecretsCmd is `dray secrets`: the secret store, seen by path and key
 // name. No command prints a value.
 func NewSecretsCmd() *cobra.Command {
-	var cfgPath, env string
+	var cfgPath, env, repo string
 	cmd := &cobra.Command{
 		Use:   "secrets",
 		Short: "Look at and import secrets in the configured store",
@@ -111,6 +27,7 @@ func NewSecretsCmd() *cobra.Command {
 			"key name; no command prints a value.",
 	}
 	cmd.PersistentFlags().StringVar(&cfgPath, "config", "", "Dray's config file (default $DRAY_CONFIG or ~/.config/dray/config.yaml)")
+	cmd.PersistentFlags().StringVar(&repo, "repo", ".", "the repo whose .dray/config.yaml names the secret store")
 	cmd.PersistentFlags().StringVar(&env, "env", "", "environment, for stores that keep secrets per environment (dev, staging, prod)")
 
 	list := &cobra.Command{
@@ -118,7 +35,7 @@ func NewSecretsCmd() *cobra.Command {
 		Short: "List secret paths, such as shop/app",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore(cfgPath, env)
+			s, err := openStore(repo, cfgPath, env)
 			if err != nil {
 				return err
 			}
@@ -141,7 +58,7 @@ func NewSecretsCmd() *cobra.Command {
 		Short: "List a secret's key names",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore(cfgPath, env)
+			s, err := openStore(repo, cfgPath, env)
 			if err != nil {
 				return err
 			}
@@ -203,7 +120,7 @@ func newSecretsImportCmd(cfgPath, env *string) *cobra.Command {
 				_, err := fmt.Fprintf(out, "%s uses no secrets\n", old.Name)
 				return err
 			}
-			target, err := openStore(*cfgPath, *env)
+			target, err := openStore(dir, *cfgPath, *env)
 			if err != nil {
 				return err
 			}

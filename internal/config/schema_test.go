@@ -12,8 +12,7 @@ var update = flag.Bool("update", false, "rewrite golden files and published sche
 
 func TestSchemasUpToDate(t *testing.T) {
 	cases := map[string]func(string) ([]byte, error){
-		"config.schema.json":   RepoConfigSchema,
-		"registry.schema.json": RegistryEntrySchema,
+		"config.schema.json": RepoConfigSchema,
 	}
 	for file, gen := range cases {
 		t.Run(file, func(t *testing.T) {

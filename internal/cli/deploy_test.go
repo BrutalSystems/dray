@@ -9,42 +9,58 @@ import (
 	"github.com/BrutalSystems/dray/internal/config"
 )
 
-func TestDeployReadsRegistryAndTarget(t *testing.T) {
-	reg := t.TempDir()
-	files := map[string]string{
-		"shop.yaml": "name: shop\nrepo: o/shop\nenvironments:\n  dev: {target: t1, namespace: shop-dev, release: direct, approval: none, allow_dirty: true}\n" +
-			"  prod: {target: t1, namespace: shop, release: direct, approval: passkey}\n",
-		"targets/t1.yaml":  "name: t1\ncloud: aws\naccount: \"123456789012\"\nregion: us-east-2\ncluster: c1\nplatform: linux/arm64\n",
-		"targets/bad.yaml": "name: bad\ncloud: aws\naccount: \"12\"\nregion: x\ncluster: c\n",
-	}
-	for p, c := range files {
-		full := filepath.Join(reg, p)
-		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(c), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	e, err := loadRegistryEntry(reg, "shop")
+func TestPickEnv(t *testing.T) {
+	c, err := config.ParseRepoConfig([]byte(`name: shop
+targets:
+  t1: {cloud: aws, account: "123456789012", region: us-east-2, cluster: c1}
+environments:
+  dev: {target: t1, namespace: shop-dev, release: direct, approval: none, allow_dirty: true}
+  prod: {target: t1, namespace: shop, release: direct, approval: passkey}
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := pickEnv(e, ""); err == nil || !strings.Contains(err.Error(), "dev, prod: name one with --env") {
+	if _, _, err := pickEnv(c, ""); err == nil || !strings.Contains(err.Error(), "dev, prod: name one with --env") {
 		t.Errorf("two environments, none named: %v", err)
 	}
-	name, env, err := pickEnv(e, "dev")
+	name, env, err := pickEnv(c, "dev")
 	if err != nil || name != "dev" || !env.AllowDirty {
 		t.Errorf("%s %+v %v", name, env, err)
 	}
-	if tg, err := loadTarget(reg, "t1"); err != nil || tg.Cluster != "c1" {
-		t.Errorf("%+v %v", tg, err)
+	if _, _, err := pickEnv(c, "qa"); err == nil {
+		t.Error("an unknown environment was accepted")
 	}
-	if _, err := loadTarget(reg, "bad"); err == nil || !strings.Contains(err.Error(), "12-digit") {
-		t.Errorf("bad target: %v", err)
+}
+
+func TestUserConfigIsOptionalAndPersonal(t *testing.T) {
+	dir := t.TempDir()
+	u, _, err := loadUserConfig(filepath.Join(dir, "none.yaml"))
+	if err != nil || len(u.AWSProfiles) != 0 {
+		t.Fatalf("a missing settings file: %+v %v", u, err)
 	}
-	if _, err := loadRegistryEntry(reg, "other"); err == nil || !strings.Contains(err.Error(), "no registry entry for other") {
-		t.Errorf("missing entry: %v", err)
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("aws_profiles:\n  \"123456789012\": deploy\nkube_contexts:\n  c1: my-c1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u, _, err = loadUserConfig(p)
+	if err != nil || u.AWSProfiles["123456789012"] != "deploy" || u.KubeContexts["c1"] != "my-c1" {
+		t.Fatalf("%+v %v", u, err)
+	}
+	if err := os.WriteFile(p, []byte("registry: ~/x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadUserConfig(p); err == nil {
+		t.Error("an unknown setting was accepted")
+	}
+}
+
+func TestRepoStoreFillsTheClient(t *testing.T) {
+	c := &config.RepoConfig{Name: "shop", SecretStore: &config.SecretStore{Type: "openbao", OpenBao: &config.OpenBaoStore{
+		Address: "https://bao.example.com", Mount: "kv", Layout: "{client}/{app}/{env}/{name}", Client: "acme",
+	}}}
+	st := repoStore(c)
+	if st.Type != "openbao" || st.OpenBao.Clients["shop"] != "acme" || st.OpenBao.Mount != "kv" {
+		t.Errorf("%+v", st.OpenBao)
 	}
 }
 

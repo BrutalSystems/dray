@@ -75,10 +75,12 @@ func TestParityWithJSTool(t *testing.T) {
 			continue
 		}
 		js := jsRender(t, toolDir, regPath, machinePath, name, tag)
-		conv := legacy.Convert(old, legacy.Options{Machine: machine, Repo: "example/" + name})
+		conv := legacy.Convert(old, legacy.Options{Machine: machine})
 		host := ""
-		if tg := conv.Targets[0]; tg.Account != "" {
-			host = fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", tg.Account, tg.Region)
+		for _, tg := range conv.Config.Targets {
+			if tg.Account != "" {
+				host = fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", tg.Account, tg.Region)
+			}
 		}
 		ecr := map[string]string{}
 		for _, img := range old.Images {

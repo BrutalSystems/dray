@@ -55,10 +55,6 @@ workloads:
 secrets:
   - name: shop-secrets
     from: secret:shop/shop-secrets
-
-# --- registry entry
-name: shop
-repo: example/monorepo
 environments:
   prod:
     target: main-cluster
@@ -67,28 +63,24 @@ environments:
     release: direct
     approval: none
     ci_required: true
+targets:
+  main-cluster:
+    cloud: aws
+    account: "111111111111"
+    region: us-east-2
+    cluster: main-cluster
+    platform: linux/arm64
 
-# --- component queue-service
-name: queue-service
-repo: example/queue-service
-kind: component
-release_on: tag
-
-# --- target main-cluster
-name: main-cluster
-cloud: aws
-account: "111111111111"
-region: us-east-2
-cluster: main-cluster
-profile: dev
-platform: linux/arm64
-
+# --- personal AWS profile
+dev
 # --- warnings
 - images[0] shop-api: the mutable :latest tag is gone; workloads pin a digest (D4)
 - images[0] shop-api: the cached deps image (shop-api:deps) is gone; BuildKit's layer cache replaces it. If the Dockerfile starts FROM shop-api:deps, switch it to a multi-stage build
 - images[1] queue: was built from https://github.com/example/queue-service at "main"; pinned to the commit running today, abc1234 (D14)
 - secrets: 1 secret(s) now come from the secret store; import their values with dray secrets import (D5)
 - workloads[2] nightly: used :latest to track new builds; it now pins a digest and is redeployed with its image (D4)
-- registry: the prod environment keeps today's behavior: namespace team-a marked shared (D15), direct apply, no approval. Tighten it once the app is on Dray
+- environments: the prod environment keeps today's behavior: namespace team-a marked shared (D15), direct apply, no approval. Give the app its own namespace and tighten it once it is on Dray
+- defaults: the AWS profile dev is personal, so it is not in the repo; set it in your own Dray settings (aws_profiles) for account 111111111111
+- secret_store: set secret_store: where the secret: references live
 # --- validation
 ok

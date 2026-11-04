@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +17,6 @@ import (
 	"github.com/BrutalSystems/dray/internal/deploy/gitsrc"
 	"github.com/BrutalSystems/dray/internal/deploy/kubectl"
 	"github.com/BrutalSystems/dray/internal/secrets"
-	"github.com/BrutalSystems/dray/internal/secrets/stores"
 )
 
 // deployFlags are dray deploy's flags.
@@ -37,14 +34,15 @@ func NewDeployCmd() *cobra.Command {
 		Use:     "deploy [repo]",
 		Aliases: []string{"ship"},
 		Short:   "Build, push, apply and roll out a repo's workloads",
-		Long: "Deploy a repo (default the current folder) to one of its environments:\n" +
+		Long: "Deploy a repo (default the current folder) to one of the environments in its\n" +
+			".dray/config.yaml:\n" +
 			"build and push each image the chosen workloads run (an image already in the\n" +
 			"registry for this commit is reused), fill the images into the manifests by\n" +
 			"digest, apply them and the secrets they need, and wait for each Deployment to\n" +
 			"roll out. A rollout is undone only when Kubernetes reports it failed.\n\n" +
-			"The app's registry entry and its target are read from the registry folder in\n" +
-			"Dray's config file (registry:, default ~/.config/dray/registry): <app>.yaml\n" +
-			"and targets/<target>.yaml.\n\n" +
+			"Everything about the app comes from the repo. Your own settings\n" +
+			"(~/.config/dray/config.yaml, optional) only say which AWS profile to use for\n" +
+			"an account (aws_profiles) and, when needed, which kube context a cluster is.\n\n" +
 			"--dry-run shows what each workload would change, and builds, pushes and\n" +
 			"applies nothing.",
 		Args: cobra.MaximumNArgs(1),
@@ -57,7 +55,7 @@ func NewDeployCmd() *cobra.Command {
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&f.cfgPath, "config", "", "Dray's config file (default $DRAY_CONFIG or ~/.config/dray/config.yaml)")
+	fl.StringVar(&f.cfgPath, "config", "", "your own settings file (default $DRAY_CONFIG or ~/.config/dray/config.yaml)")
 	fl.StringVar(&f.env, "env", "", "environment to deploy to (default: the app's only environment)")
 	fl.StringVar(&f.repoConfig, "repo-config", "", "read the repo's config from this file instead of .dray/config.yaml, to try a repo before it moves")
 	fl.StringArrayVar(&f.workloads, "workload", nil, "deploy only this workload (repeatable; a manual workload ships only when named)")
@@ -77,29 +75,11 @@ func runDeploy(cmd *cobra.Command, dir string, f deployFlags) error {
 	if err != nil {
 		return err
 	}
-	uc, ucPath, err := loadUserConfig(f.cfgPath)
+	envName, env, err := pickEnv(c, f.env)
 	if err != nil {
 		return err
 	}
-	regDir, err := expandHome(uc.Registry)
-	if err != nil {
-		return err
-	}
-	if regDir == "" {
-		regDir = filepath.Join(filepath.Dir(ucPath), "registry")
-	}
-	entry, err := loadRegistryEntry(regDir, c.Name)
-	if err != nil {
-		return err
-	}
-	envName, env, err := pickEnv(entry, f.env)
-	if err != nil {
-		return err
-	}
-	target, err := loadTarget(regDir, env.Target)
-	if err != nil {
-		return err
-	}
+	target := c.Targets[env.Target]
 	if env.Release != "direct" {
 		return fmt.Errorf("%s's %s environment releases by %s; the CLI deploys only direct environments so far", c.Name, envName, env.Release)
 	}
@@ -107,38 +87,54 @@ func runDeploy(cmd *cobra.Command, dir string, f deployFlags) error {
 		return fmt.Errorf("%s's %s environment needs %s approval, which arrives with the Dray server; the CLI cannot approve", c.Name, envName, env.Approval)
 	}
 	if target.Cloud != "aws" {
-		return fmt.Errorf("target %s: only aws targets are supported so far", target.Name)
+		return fmt.Errorf("target %s: only aws targets are supported so far", env.Target)
+	}
+	u, _, err := loadUserConfig(f.cfgPath)
+	if err != nil {
+		return err
 	}
 
 	var store secrets.Store
 	if needsStore(c, f.workloads) {
-		if store, err = stores.Open(uc.SecretStore, envName); err != nil {
-			return fmt.Errorf("%s: %w", ucPath, err)
+		if store, err = openStore(repoDir, f.cfgPath, envName); err != nil {
+			return err
 		}
 	}
 
 	inCI := os.Getenv("GITHUB_ACTIONS") == "true"
-	profile := target.Profile
+	profile := u.AWSProfiles[target.Account]
 	if inCI {
 		// In GitHub Actions credentials arrive through OIDC as environment
 		// variables; a named profile does not exist there.
 		profile = ""
 	}
+	kubeContext := target.Cluster
+	if k := u.KubeContexts[target.Cluster]; k != "" {
+		kubeContext = k
+	}
 	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
-	folder := entry.Repo[strings.LastIndex(entry.Repo, "/")+1:]
 	o := deploy.Options{
-		Repo: c, RepoDir: repoDir, EnvName: envName, Env: env, Target: *target, Workloads: f.workloads,
+		Repo: c, RepoDir: repoDir, EnvName: envName, Env: env, Target: target, Workloads: f.workloads,
 		DryRun: f.dryRun, AllowDirty: f.allowDirty, SkipCI: f.skipCI, InCI: inCI, Restart: f.restart,
 		Out:      out,
 		Registry: &ecr.Registry{Account: target.Account, Region: target.Region, Profile: profile},
 		Builder:  &docker.Builder{Progress: errOut},
-		Cluster:  &kubectl.Cluster{Context: target.Cluster, Namespace: env.Namespace, Progress: errOut},
-		Source:   &gitsrc.Repo{Dir: repoDir, Folder: folder, Sources: buildSources(c), Log: out},
+		Cluster:  &kubectl.Cluster{Context: kubeContext, Namespace: env.Namespace, Progress: errOut},
+		Source:   &gitsrc.Repo{Dir: repoDir, Folder: repoFolder(repoDir), Sources: buildSources(c), Log: out},
 		CI:       &ghci.CI{Dir: repoDir},
 		Secrets:  store,
 	}
 	_, _ = fmt.Fprintf(out, "Deploying %s to %s (namespace %s on %s)\n\n", c.Name, envName, env.Namespace, target.Cluster)
 	return deploy.Run(cmd.Context(), o)
+}
+
+// repoFolder is the folder name the repo's checkout gets in a build
+// workspace: its repository's name, else its folder's.
+func repoFolder(dir string) string {
+	if r := gitHubRepo(dir); r != "" {
+		return r[strings.LastIndex(r, "/")+1:]
+	}
+	return filepath.Base(dir)
 }
 
 func loadRepoConfig(repoDir, override string) (*config.RepoConfig, error) {
@@ -156,48 +152,7 @@ func loadRepoConfig(repoDir, override string) (*config.RepoConfig, error) {
 	return c, nil
 }
 
-func loadRegistryEntry(dir, app string) (*config.RegistryEntry, error) {
-	p := filepath.Join(dir, app+".yaml")
-	data, err := os.ReadFile(p) //nolint:gosec // the user's registry folder
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("no registry entry for %s: create %s (dray config migrate prints a draft)", app, p)
-	}
-	if err != nil {
-		return nil, err
-	}
-	e, err := config.ParseRegistryEntry(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", p, err)
-	}
-	if e.Name != app {
-		return nil, fmt.Errorf("%s: names app %q, not %q", p, e.Name, app)
-	}
-	if e.EffectiveKind() != config.KindApp {
-		return nil, fmt.Errorf("%s is a component; components never deploy on their own", app)
-	}
-	return e, nil
-}
-
-func loadTarget(dir, name string) (*config.Target, error) {
-	p := filepath.Join(dir, "targets", name+".yaml")
-	data, err := os.ReadFile(p) //nolint:gosec // the user's registry folder
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("no target %s: create %s (dray config migrate prints a draft)", name, p)
-	}
-	if err != nil {
-		return nil, err
-	}
-	t, err := config.ParseTarget(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", p, err)
-	}
-	if t.Name != name {
-		return nil, fmt.Errorf("%s: names target %q, not %q", p, t.Name, name)
-	}
-	return t, nil
-}
-
-func pickEnv(e *config.RegistryEntry, name string) (string, config.Environment, error) {
+func pickEnv(e *config.RepoConfig, name string) (string, config.Environment, error) {
 	names := make([]string, 0, len(e.Environments))
 	for n := range e.Environments {
 		names = append(names, n)

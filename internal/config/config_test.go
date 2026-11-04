@@ -171,9 +171,8 @@ func TestSecretRef(t *testing.T) {
 	}
 }
 
-const goodRegistry = `
+const goodDeploy = `
 name: shop
-repo: example/shop
 environments:
   staging:
     target: main
@@ -189,33 +188,51 @@ environments:
     approval: passkey
     ci_required: true
     promote_from: staging
+targets:
+  main:
+    cloud: aws
+    account: "123456789012"
+    region: us-east-2
+    cluster: main
+    platform: linux/arm64
+secret_store:
+  type: openbao
+  openbao:
+    address: https://bao.example.com
+    mount: kv
+    layout: "{client}/{app}/{env}/{name}"
+    client: acme
 third_party:
   - docker.io/searxng/searxng
 `
 
-func TestParseGoodRegistry(t *testing.T) {
-	e, err := ParseRegistryEntry([]byte(goodRegistry))
+func TestParseGoodDeploy(t *testing.T) {
+	c, err := ParseRepoConfig([]byte(goodDeploy))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.EffectiveKind() != KindApp {
-		t.Errorf("kind = %q, want app", e.EffectiveKind())
+	if c.Targets["main"].Cluster != "main" || c.SecretStore.OpenBao.Client != "acme" {
+		t.Errorf("%+v", c)
 	}
 }
 
-func TestRegistryProblems(t *testing.T) {
+func TestDeployProblems(t *testing.T) {
+	tg := "targets:\n  t: {cloud: aws, account: \"123456789012\", region: us-east-2, cluster: c}\n"
+	env := "environments:\n  prod: {target: t, namespace: a, release: gitops, approval: none}\n"
 	cases := map[string]struct{ doc, want string }{
-		"no environments":        {"name: a\nrepo: o/a\n", "an app needs at least one environment"},
-		"component environments": {"name: a\nrepo: o/a\nkind: component\nrelease_on: tag\nenvironments:\n  prod: {target: t, namespace: a, release: gitops, approval: none}\n", "never deploys on its own"},
-		"component release_on":   {"name: a\nrepo: o/a\nkind: component\n", "release_on: tag"},
-		"bad release":            {"name: a\nrepo: o/a\nenvironments:\n  prod: {target: t, namespace: a, release: ftp, approval: none}\n", `"ftp" must be one of direct, gitops, feed`},
-		"promote loop":           {"name: a\nrepo: o/a\nenvironments:\n  x: {target: t, namespace: a, release: gitops, approval: none, promote_from: y}\n  y: {target: t, namespace: a, release: gitops, approval: none, promote_from: x}\n", "promotion forms a loop"},
-		"third party with tag":   {"name: a\nrepo: o/a\nenvironments:\n  prod: {target: t, namespace: a, release: gitops, approval: none}\nthird_party: [docker.io/library/postgres:16]\n", "without tag or digest"},
-		"bad repo":               {"name: a\nrepo: a\nenvironments:\n  prod: {target: t, namespace: a, release: gitops, approval: none}\n", `"a" must be owner/name`},
+		"unknown target":       {"name: a\n" + env, `"t" is not in targets`},
+		"bad release":          {"name: a\n" + tg + "environments:\n  prod: {target: t, namespace: a, release: ftp, approval: none}\n", `"ftp" must be one of direct, gitops, feed`},
+		"promote loop":         {"name: a\n" + tg + "environments:\n  x: {target: t, namespace: a, release: gitops, approval: none, promote_from: y}\n  y: {target: t, namespace: a, release: gitops, approval: none, promote_from: x}\n", "promotion forms a loop"},
+		"third party with tag": {"name: a\n" + tg + env + "third_party: [docker.io/library/postgres:16]\n", "without tag or digest"},
+		"bad account":          {"name: a\ntargets:\n  t: {cloud: aws, account: \"12\", region: us-east-2, cluster: c}\n" + env, "12-digit"},
+		"no cluster":           {"name: a\ntargets:\n  t: {cloud: aws, account: \"123456789012\", region: us-east-2}\n" + env, "name the Kubernetes cluster"},
+		"file store no dir":    {"name: a\nsecret_store: {type: file}\n", "name the folder"},
+		"store type":           {"name: a\nsecret_store: {type: s3}\n", `"s3" must be one of openbao, file`},
+		"credential field":     {"name: a\n" + "targets:\n  t: {cloud: aws, account: \"123456789012\", region: us-east-2, cluster: c, profile: me}\n", "unknown field"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseRegistryEntry([]byte(tc.doc))
+			_, err := ParseRepoConfig([]byte(tc.doc))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want an error containing %q, got %v", tc.want, err)
 			}

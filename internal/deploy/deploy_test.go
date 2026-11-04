@@ -60,6 +60,15 @@ type fakeCluster struct {
 	waited    []string
 	undone    []string
 	waitErr   error
+	ns        NamespaceState
+	claimed   string
+}
+
+func (c *fakeCluster) ReadNamespace(context.Context) (NamespaceState, error) { return c.ns, nil }
+func (c *fakeCluster) Claim(_ context.Context, app string) error {
+	c.claimed = app
+	c.ns = NamespaceState{Exists: true, Owner: app}
+	return nil
 }
 
 // Diff matches the longest key the doc contains, so "kind: Secret" wins
@@ -215,7 +224,7 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		reg: &fakeRegistry{tags: map[string]string{}},
 		b:   &fakeBuilder{},
-		cl:  &fakeCluster{changed: map[string]bool{}, state: map[string][]DeploymentState{}},
+		cl:  &fakeCluster{changed: map[string]bool{}, state: map[string][]DeploymentState{}, ns: NamespaceState{Exists: true, Owner: "shop"}},
 		src: &fakeSource{commit: "1234567", root: t.TempDir()},
 		ci:  &fakeCI{},
 		out: &bytes.Buffer{},
@@ -223,7 +232,7 @@ func newHarness(t *testing.T) *harness {
 	h.o = Options{
 		Repo: c, RepoDir: dir, EnvName: "prod",
 		Env:    config.Environment{Namespace: "shop", Target: "t"},
-		Target: config.Target{Name: "t", Cluster: "ctx", Platform: "linux/arm64"},
+		Target: config.Target{Cluster: "ctx", Platform: "linux/arm64"},
 		Out:    h.out, Registry: h.reg, Builder: h.b, Cluster: h.cl, Source: h.src, CI: h.ci, Secrets: store,
 		Now: func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) },
 	}
@@ -542,4 +551,45 @@ func TestNoRestartAfterTheApplyStartedARollout(t *testing.T) {
 	if len(h.cl.restarted) != 0 || strings.Join(h.cl.waited, ",") != "api,web" {
 		t.Errorf("restarted %v, waited %v", h.cl.restarted, h.cl.waited)
 	}
+}
+
+func TestNamespaceOwnership(t *testing.T) {
+	t.Run("another app's namespace is refused", func(t *testing.T) {
+		h := newHarness(t)
+		h.cl.ns = NamespaceState{Exists: true, Owner: "other"}
+		if err := h.run(t); err == nil || !strings.Contains(err.Error(), "belongs to app other") || len(h.b.built) > 0 {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a new namespace is created and claimed", func(t *testing.T) {
+		h := newHarness(t)
+		h.cl.ns = NamespaceState{}
+		if err := h.run(t); err != nil || h.cl.claimed != "shop" {
+			t.Fatalf("err %v, claimed %q", err, h.cl.claimed)
+		}
+	})
+	t.Run("an unlabeled namespace is claimed", func(t *testing.T) {
+		h := newHarness(t)
+		h.cl.ns = NamespaceState{Exists: true}
+		if err := h.run(t); err != nil || h.cl.claimed != "shop" {
+			t.Fatalf("err %v, claimed %q", err, h.cl.claimed)
+		}
+	})
+	t.Run("a dry run claims nothing", func(t *testing.T) {
+		h := newHarness(t)
+		h.o.DryRun = true
+		h.cl.ns = NamespaceState{}
+		_ = h.run(t)
+		if h.cl.claimed != "" || !strings.Contains(h.out.String(), "it will be created for shop") {
+			t.Fatalf("claimed %q\n%s", h.cl.claimed, h.out)
+		}
+	})
+	t.Run("a shared namespace is not claimed", func(t *testing.T) {
+		h := newHarness(t)
+		h.o.Env.NamespaceMode = "shared"
+		h.cl.ns = NamespaceState{Exists: true}
+		if err := h.run(t); err != nil || h.cl.claimed != "" {
+			t.Fatalf("err %v, claimed %q", err, h.cl.claimed)
+		}
+	})
 }

@@ -35,7 +35,7 @@ make snapshot   # goreleaser: every platform into dist/
 | `cmd/dray` | The CLI |
 | `cmd/dray-server` | The server (MCP, HTTP API, approvals), from milestone M1.2 |
 | `internal/cli` | Command tree shared by both binaries |
-| `internal/config` | `.dray/config.yaml` and registry entries: types, strict parsing, validation |
+| `internal/config` | `.dray/config.yaml`: types, strict parsing, validation |
 | `internal/config/legacy` | Reading and converting the JS tool's `.dray/config.json` |
 | `internal/secrets` | The `Store` interface; adapters in `file/`, `openbao/`, `sops/` (read-only); `storetest/` is the conformance suite every adapter passes |
 | `internal/render` | Filling image placeholders in a workload's manifests; parity test against the JS tool |
@@ -45,41 +45,72 @@ make snapshot   # goreleaser: every platform into dist/
 | `internal/version` | Version info, set at release time |
 | `docs/decisions.md` | Why Dray is built the way it is |
 
-## Secret store
+## A repo's `.dray/` folder
 
-Repos refer to secrets as `secret:<app>/<name>`; which store holds them is a
-deployment setting in `~/.config/dray/config.yaml` (or `$DRAY_CONFIG`):
+Everything Dray needs to build and deploy an app is in its repo, in
+`.dray/config.yaml`: the images, the workloads, where the app deploys, and
+where its secrets live. Anyone who clones the repo, has Dray installed and has
+the access (cloud, cluster, secret store) can deploy it.
 
 ```yaml
+name: shop
+images:
+  - name: api
+workloads:
+  - name: api
+    kind: deployment
+    images: [api]
+    manifests: [k8s/api.yaml]
+    secrets: [api-secrets]
+secrets:
+  - name: api-secrets
+    from: secret:shop/api-secrets
+environments:
+  prod:
+    target: cluster-a
+    namespace: shop
+    release: direct
+    approval: none
+targets:
+  cluster-a:
+    cloud: aws
+    account: "123456789012"
+    region: us-east-2
+    cluster: cluster-a
+    platform: linux/arm64
 secret_store:
-  type: openbao            # or file
+  type: openbao
   openbao:
-    address: https://bao.example.com   # default: BAO_ADDR, then VAULT_ADDR
-    mount: kv                          # a KV version 2 engine
+    address: https://bao.example.com
+    mount: kv
     layout: "{client}/{app}/{env}/{name}"
-    clients:
-      shop: acme
+    client: acme
 ```
 
-The layout follows the vault's own naming: with the one above,
-`secret:shop/app` deployed to prod is `kv/acme/shop/prod/app`. The default
-layout is `{app}/{name}`; `--env` names the environment.
+Credentials are never in it. Your own settings, `~/.config/dray/config.yaml`
+(optional), hold only what differs per person:
 
-The token comes from `BAO_TOKEN`, `VAULT_TOKEN` or `~/.vault-token`, never the
-file. To use another store, write an adapter that implements
-`secrets.Store` and passes `storetest.Run`.
+```yaml
+aws_profiles:
+  "123456789012": my-deploy-profile    # default: the AWS CLI's usual credentials
+kube_contexts:
+  cluster-a: my-context                # default: the cluster's name
+```
+
+Since the repo says where the app deploys, protect it: changes to `.dray/`
+should need the owner's review (CODEOWNERS), and Dray only ever reads where
+an app may deploy from the main branch. Dray labels each namespace it creates
+with its app (`dray/app`) and refuses to deploy another app into it.
+
+### Secret store
+
+Repos refer to secrets as `secret:<app>/<name>`. With the layout above,
+`secret:shop/api-secrets` deployed to prod is `kv/acme/shop/prod/api-secrets`.
+The default layout is `{app}/{name}`. The token comes from `BAO_TOKEN`,
+`VAULT_TOKEN` or `~/.vault-token`, never a file. To use another store, write
+an adapter that implements `secrets.Store` and passes `storetest.Run`.
 
 ## Deploying from the CLI
-
-`dray deploy` reads the app's registry entry and its target from a registry
-folder (`registry:` in the config file, default `~/.config/dray/registry`):
-
-```text
-registry/
-  shop.yaml            # the app's environments (dray config migrate prints a draft)
-  targets/
-    cluster-a.yaml     # cloud account, region, kube context, build platform
-```
 
 ```bash
 dray deploy --dry-run          # what each workload would change; nothing built or applied

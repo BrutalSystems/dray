@@ -1,5 +1,5 @@
 // Package legacy reads the JS dray's .dray/config.json and converts it to
-// Dray v2's .dray/config.yaml plus a draft registry entry.
+// Dray v2's .dray/config.yaml.
 package legacy
 
 import (

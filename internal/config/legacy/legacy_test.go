@@ -53,12 +53,8 @@ func render(t *testing.T, r *Result) []byte {
 		fmt.Fprintf(&b, "# --- %s\n%s\n", title, out)
 	}
 	section(".dray/config.yaml", r.Config, &r.Comments)
-	section("registry entry", r.Registry, nil)
-	for _, c := range r.Components {
-		section("component "+c.Name, c, nil)
-	}
-	for _, tg := range r.Targets {
-		section("target "+tg.Name, tg, nil)
+	if r.Profile != "" {
+		fmt.Fprintf(&b, "# --- personal AWS profile\n%s\n", r.Profile)
 	}
 	b.WriteString("# --- warnings\n")
 	for _, w := range r.Warnings {
@@ -78,7 +74,7 @@ func TestConvertGolden(t *testing.T) {
 	for _, name := range []string{"monorepo", "frontend", "envcopies"} {
 		t.Run(name, func(t *testing.T) {
 			r := Convert(load(t, name+".json"), Options{
-				Machine: machine(t), Repo: "example/" + name,
+				Machine:       machine(t),
 				RunningCommit: func(img string) string { return pins[img] },
 				BuildSources:  siblingLib,
 			})
@@ -111,7 +107,7 @@ func siblingLib(img Image) []config.BuildSource {
 }
 
 func TestParentContextWithoutSourcesIsFlagged(t *testing.T) {
-	r := Convert(load(t, "envcopies.json"), Options{Machine: machine(t), Repo: "example/booking"})
+	r := Convert(load(t, "envcopies.json"), Options{Machine: machine(t)})
 	for _, w := range r.Warnings {
 		if strings.Contains(w.Message, "If the build needs other repos beside it, list them in sources") {
 			return
@@ -123,7 +119,7 @@ func TestParentContextWithoutSourcesIsFlagged(t *testing.T) {
 func TestConvertedConfigsRoundTrip(t *testing.T) {
 	for _, name := range []string{"monorepo", "frontend"} {
 		r := Convert(load(t, name+".json"), Options{
-			Machine: machine(t), Repo: "example/" + name,
+			Machine:       machine(t),
 			RunningCommit: func(string) string { return "abc1234" },
 		})
 		out, err := config.EncodeYAML(r.Config, &r.Comments)
@@ -132,13 +128,6 @@ func TestConvertedConfigsRoundTrip(t *testing.T) {
 		}
 		if _, err := config.ParseRepoConfig(out); err != nil {
 			t.Errorf("%s: written config does not read back: %v\n%s", name, err, out)
-		}
-		reg, err := config.EncodeYAML(r.Registry, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := config.ParseRegistryEntry(reg); err != nil {
-			t.Errorf("%s: registry draft does not read back: %v\n%s", name, err, reg)
 		}
 	}
 }
@@ -168,7 +157,7 @@ func TestEmptyPiletsList(t *testing.T) {
 }
 
 func TestUnpinnedComponentNeedsAPerson(t *testing.T) {
-	r := Convert(load(t, "monorepo.json"), Options{Machine: machine(t), Repo: "example/shop"})
+	r := Convert(load(t, "monorepo.json"), Options{Machine: machine(t)})
 	err := r.Config.Validate()
 	if err == nil || !strings.Contains(err.Error(), "pin queue-service") {
 		t.Fatalf("an unpinned component must fail validation, got %v", err)
@@ -176,16 +165,15 @@ func TestUnpinnedComponentNeedsAPerson(t *testing.T) {
 }
 
 func TestComponentFromGit(t *testing.T) {
-	cases := map[string][2]string{
-		"https://github.com/example/queue-service":     {"queue-service", "example/queue-service"},
-		"https://github.com/example/Queue-Service.git": {"queue-service", "example/Queue-Service"},
-		"git@github.com:example/queue.git":             {"queue", "example/queue"},
-		"https://gitlab.com/group/sub/thing":           {"thing", ""},
+	cases := map[string]string{
+		"https://github.com/example/queue-service":     "queue-service",
+		"https://github.com/example/Queue-Service.git": "queue-service",
+		"git@github.com:example/queue.git":             "queue",
+		"https://gitlab.com/group/sub/thing/":          "thing",
 	}
 	for in, want := range cases {
-		name, repo := componentFromGit(in)
-		if name != want[0] || repo != want[1] {
-			t.Errorf("componentFromGit(%q) = %q, %q; want %q, %q", in, name, repo, want[0], want[1])
+		if got := componentFromGit(in); got != want {
+			t.Errorf("componentFromGit(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -207,7 +195,7 @@ func TestRealConfigs(t *testing.T) {
 			failed++
 			continue
 		}
-		r := Convert(c, Options{Repo: "example/" + name, RunningCommit: func(string) string { return "abc1234" }})
+		r := Convert(c, Options{RunningCommit: func(string) string { return "abc1234" }})
 		if err := r.Config.Validate(); err != nil {
 			t.Logf("%s: needs a person: %v", name, err)
 			failed++
@@ -229,7 +217,7 @@ func TestRealConfigs(t *testing.T) {
 func TestSecretSourcesMatchConvertedReferences(t *testing.T) {
 	for _, name := range []string{"monorepo", "frontend", "envcopies"} {
 		old := load(t, name+".json")
-		r := Convert(old, Options{Machine: machine(t), Repo: "example/" + name})
+		r := Convert(old, Options{Machine: machine(t)})
 		refs := map[string]bool{}
 		for _, s := range r.Config.Secrets {
 			refs[string(s.From)] = true

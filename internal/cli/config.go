@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,46 +25,30 @@ func NewConfigCmd() *cobra.Command {
 }
 
 func newConfigValidateCmd() *cobra.Command {
-	var registry bool
-	cmd := &cobra.Command{
-		Use:   "validate [path]",
-		Short: "Check a repo's .dray/config.yaml, or a registry entry with --registry",
-		Long: "Check a repo's .dray/config.yaml (path is the repo, default the current folder),\n" +
-			"or with --registry a registry entry file. Unknown keys, wrong types and broken\n" +
-			"references are errors.",
+	return &cobra.Command{
+		Use:   "validate [repo]",
+		Short: "Check a repo's .dray/config.yaml",
+		Long: "Check a repo's .dray/config.yaml (path is the repo, default the current folder).\n" +
+			"Unknown keys, wrong types and broken references are errors.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target := "."
+			dir := "."
 			if len(args) == 1 {
-				target = args[0]
+				dir = args[0]
 			}
-			if registry {
-				data, err := os.ReadFile(target)
-				if err != nil {
-					return err
-				}
-				if _, err := config.ParseRegistryEntry(data); err != nil {
-					return fmt.Errorf("%s: %w", target, err)
-				}
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: ok\n", target)
+			if _, err := config.LoadRepoConfig(dir); err != nil {
 				return err
 			}
-			if _, err := config.LoadRepoConfig(target); err != nil {
-				return err
-			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s: ok\n", filepath.Join(target, config.RepoConfigPath))
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s: ok\n", filepath.Join(dir, config.RepoConfigPath))
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&registry, "registry", false, "the path is a registry entry file")
-	return cmd
 }
 
 func newConfigMigrateCmd() *cobra.Command {
 	var (
 		write   bool
 		env     string
-		repo    string
 		pins    []string
 		machine string
 	)
@@ -74,7 +56,7 @@ func newConfigMigrateCmd() *cobra.Command {
 		Use:   "migrate [repo]",
 		Short: "Convert a repo's .dray/config.json from the JS tool",
 		Long: "Convert a repo's .dray/config.json (from the JS dray) to .dray/config.yaml,\n" +
-			"and print a draft registry entry, any shared components and the target.\n" +
+			"with the app's environment and target filled in from the old defaults.\n" +
 			"Everything the conversion changed or could not decide is listed as a warning.\n" +
 			"Nothing is written unless you pass --write.",
 		Args: cobra.MaximumNArgs(1),
@@ -91,11 +73,7 @@ func newConfigMigrateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			opts := legacy.Options{Environment: env, Repo: repo}
-			if opts.Repo == "" {
-				opts.Repo = gitHubRepo(dir)
-			}
-			opts.Path = repoSubdir(dir)
+			opts := legacy.Options{Environment: env}
 			if machine == "" {
 				if home, err := os.UserHomeDir(); err == nil {
 					machine = filepath.Join(home, ".dray", "config.json")
@@ -134,19 +112,6 @@ func newConfigMigrateCmd() *cobra.Command {
 			} else {
 				_, _ = fmt.Fprintf(w, "# --- %s\n%s\n", config.RepoConfigPath, out)
 			}
-			if err := printDraft(w, "registry/"+res.Registry.Name+".yaml (draft)", res.Registry); err != nil {
-				return err
-			}
-			for _, c := range res.Components {
-				if err := printDraft(w, "registry/components/"+c.Name+".yaml (draft)", c); err != nil {
-					return err
-				}
-			}
-			for _, t := range res.Targets {
-				if err := printDraft(w, "target "+t.Name+" (draft)", t); err != nil {
-					return err
-				}
-			}
 			ew := cmd.ErrOrStderr()
 			if len(res.Warnings) > 0 {
 				_, _ = fmt.Fprintf(ew, "%d thing(s) to check:\n", len(res.Warnings))
@@ -162,7 +127,6 @@ func newConfigMigrateCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&write, "write", false, "write .dray/config.yaml into the repo")
 	cmd.Flags().StringVar(&env, "env", "prod", "name of the environment the app gets")
-	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository owner/name (default: from the origin remote)")
 	cmd.Flags().StringArrayVar(&pins, "pin", nil, "pin an image built from another repo to a commit: image=commit (repeatable)")
 	cmd.Flags().StringVar(&machine, "machine-config", "", "the JS tool's machine config (default ~/.dray/config.json)")
 	return cmd
@@ -170,36 +134,14 @@ func newConfigMigrateCmd() *cobra.Command {
 
 func newConfigSchemaCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:       "schema [config|registry]",
-		Short:     "Print the JSON Schema for .dray/config.yaml or a registry entry",
-		Args:      cobra.MaximumNArgs(1),
-		ValidArgs: []string{"config", "registry"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			which := "config"
-			if len(args) == 1 {
-				which = args[0]
-			}
-			switch which {
-			case "config":
-				_, err := cmd.OutOrStdout().Write(schema.Config)
-				return err
-			case "registry":
-				_, err := cmd.OutOrStdout().Write(schema.Registry)
-				return err
-			default:
-				return errors.New("choose config or registry")
-			}
+		Use:   "schema",
+		Short: "Print the JSON Schema for .dray/config.yaml",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := cmd.OutOrStdout().Write(schema.Config)
+			return err
 		},
 	}
-}
-
-func printDraft(w io.Writer, title string, v any) error {
-	out, err := config.EncodeYAML(v, nil)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "# --- %s\n%s\n", title, out)
-	return err
 }
 
 func readMachineDefaults(path string) (legacy.Defaults, error) {
@@ -223,13 +165,4 @@ func gitHubRepo(dir string) string {
 		}
 	}
 	return ""
-}
-
-// repoSubdir returns dir's path inside its git repo, or "" at the root.
-func repoSubdir(dir string) string {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-prefix").Output() //nolint:gosec // fixed git arguments, no shell
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSuffix(strings.TrimSpace(string(out)), "/")
 }

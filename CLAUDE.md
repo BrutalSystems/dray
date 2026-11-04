@@ -14,7 +14,8 @@ local session go in `CLAUDE.local.md`, which is gitignored.
 - Dray must stand on its own. Every external system sits behind an interface
   (secret store, cloud identity, builder, target, Git); core never imports a
   provider SDK.
-- Repos and registry entries use logical `secret:` references, never store paths.
+- Repos use logical `secret:` references, never store paths. Everything an app
+  needs to deploy is in its `.dray/config.yaml` (D20); credentials never are.
 - Decisions already made are in `docs/decisions.md`. Don't reopen one without
   saying so.
 - The JS tool's safety rules are acceptance tests. Each gets a test when it is

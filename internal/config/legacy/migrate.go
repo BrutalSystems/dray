@@ -2,8 +2,6 @@ package legacy
 
 import (
 	"fmt"
-	"net/url"
-	"path"
 	"sort"
 	"strings"
 	"time"
@@ -15,10 +13,6 @@ import (
 type Options struct {
 	// Machine are the defaults from the old ~/.dray/config.json.
 	Machine Defaults
-	// Repo is the app's GitHub repository, owner/name.
-	Repo string
-	// Path is the app's folder inside the repo, when it is not the root.
-	Path string
 	// Environment names the one environment the app gets; defaults to "prod".
 	Environment string
 	// RunningCommit returns the commit an image from another repo is running
@@ -35,12 +29,11 @@ type Options struct {
 type Result struct {
 	Config   config.RepoConfig
 	Comments config.Comments
-	Registry config.RegistryEntry
-	// Components are draft registry entries for shared services that this
-	// app used to build from their repos.
-	Components []config.RegistryEntry
-	Targets    []config.Target
-	Warnings   []Warning
+	// Profile is the local AWS profile the old config named. Profiles are
+	// personal, so it belongs in the person's own Dray settings, keyed by
+	// account.
+	Profile  string
+	Warnings []Warning
 }
 
 // Warning is something the conversion could not decide alone.
@@ -51,8 +44,7 @@ type Warning struct {
 
 func (w Warning) String() string { return w.Where + ": " + w.Message }
 
-// Convert turns a JS-tool config into Dray v2's config and a draft registry
-// entry. It never guesses silently: anything it changes or cannot carry over
+// Convert turns a JS-tool config into Dray v2's config. It never guesses silently: anything it changes or cannot carry over
 // becomes a warning.
 func Convert(old *Config, opts Options) *Result {
 	r := &Result{}
@@ -87,7 +79,7 @@ func Convert(old *Config, opts Options) *Result {
 	for i, img := range old.Images {
 		where := fmt.Sprintf("images[%d] %s", i, img.Name)
 		if img.Source.Git != "" {
-			comp, repo := componentFromGit(img.Source.Git)
+			comp := componentFromGit(img.Source.Git)
 			u := config.Use{Component: comp}
 			if comp != img.Name {
 				u.As = img.Name
@@ -105,11 +97,6 @@ func Convert(old *Config, opts Options) *Result {
 				warn(where, "was built from %s at %q; pinned to the commit running today, %s (D14)", img.Source.Git, refOr(img.Source.Ref), u.Commit)
 			}
 			c.Uses = append(c.Uses, u)
-			if repo != "" && !hasComponent(r.Components, comp) {
-				r.Components = append(r.Components, config.RegistryEntry{
-					Name: comp, Repo: repo, Kind: config.KindComponent, ReleaseOn: "tag",
-				})
-			}
 			if img.Latest {
 				warn(where, "the mutable :latest tag is gone; workloads pin a digest (D4)")
 			}
@@ -240,18 +227,18 @@ func Convert(old *Config, opts Options) *Result {
 		}
 	}
 
-	// Registry entry and target.
-	target := config.Target{
-		Name: repoDefaults.Context, Cloud: "aws", Account: repoDefaults.Account, Region: repoDefaults.Region,
-		Cluster: repoDefaults.Context, Profile: repoDefaults.Profile, Platform: repoDefaults.Platform,
+	// Environment and target.
+	name := repoDefaults.Context
+	if name == "" {
+		name = "default"
+		warn("defaults", "no kube context set; name the target's cluster")
 	}
-	if target.Name == "" {
-		target.Name = "default"
-		warn("defaults", "no kube context set; name the target")
-	}
-	r.Targets = []config.Target{target}
+	c.Targets = map[string]config.Target{name: {
+		Cloud: "aws", Account: repoDefaults.Account, Region: repoDefaults.Region,
+		Cluster: repoDefaults.Context, Platform: repoDefaults.Platform,
+	}}
 	env := config.Environment{
-		Target: target.Name, Namespace: repoDefaults.Namespace, NamespaceMode: "shared",
+		Target: name, Namespace: repoDefaults.Namespace, NamespaceMode: "shared",
 		Release: "direct", Approval: "none",
 	}
 	if repoDefaults.CIGate != nil && *repoDefaults.CIGate {
@@ -260,14 +247,15 @@ func Convert(old *Config, opts Options) *Result {
 	if env.Namespace == "" {
 		warn("defaults", "no namespace set; fill it in")
 	}
-	r.Registry = config.RegistryEntry{
-		Name: old.Name, Repo: opts.Repo, Path: opts.Path,
-		Environments: map[string]config.Environment{envName: env},
+	c.Environments = map[string]config.Environment{envName: env}
+	warn("environments", "the %s environment keeps today's behavior: namespace %s marked shared (D15), direct apply, no approval. Give the app its own namespace and tighten it once it is on Dray", envName, env.Namespace)
+	if repoDefaults.Profile != "" {
+		r.Profile = repoDefaults.Profile
+		warn("defaults", "the AWS profile %s is personal, so it is not in the repo; set it in your own Dray settings (aws_profiles) for account %s", repoDefaults.Profile, repoDefaults.Account)
 	}
-	if opts.Repo == "" {
-		warn("registry", "set repo to the app's GitHub repository (owner/name)")
+	if len(c.Secrets) > 0 || (c.Pilets != nil && c.Pilets.Env != "") {
+		warn("secret_store", "set secret_store: where the secret: references live")
 	}
-	warn("registry", "the %s environment keeps today's behavior: namespace %s marked shared (D15), direct apply, no approval. Tighten it once the app is on Dray", envName, env.Namespace)
 	return r
 }
 
@@ -279,32 +267,14 @@ func refOr(ref string) string {
 }
 
 // componentFromGit names a component after its repository: jobs-service for
-// https://github.com/org/jobs-service(.git). It also returns owner/name when
-// the URL is on GitHub.
-func componentFromGit(raw string) (name, repo string) {
+// https://github.com/org/jobs-service(.git) or git@github.com:org/jobs-service.
+func componentFromGit(raw string) string {
 	s := strings.TrimSuffix(strings.TrimSpace(raw), "/")
 	s = strings.TrimSuffix(s, ".git")
-	if strings.HasPrefix(s, "git@") {
-		if _, after, ok := strings.Cut(s, ":"); ok {
-			repo = after
-		}
-	} else if u, err := url.Parse(s); err == nil {
-		repo = strings.TrimPrefix(u.Path, "/")
+	if i := strings.LastIndexAny(s, "/:"); i >= 0 {
+		s = s[i+1:]
 	}
-	name = path.Base(s)
-	if strings.Count(repo, "/") != 1 {
-		repo = ""
-	}
-	return strings.ToLower(name), repo
-}
-
-func hasComponent(list []config.RegistryEntry, name string) bool {
-	for _, e := range list {
-		if e.Name == name {
-			return true
-		}
-	}
-	return false
+	return strings.ToLower(s)
 }
 
 func latestImage(c *Config, name string) bool {

@@ -16,11 +16,6 @@ func RepoConfigSchema(commentsDir string) ([]byte, error) {
 	return schemaFor(&RepoConfig{}, commentsDir, "config.schema.json", "Dray repo config (.dray/config.yaml)")
 }
 
-// RegistryEntrySchema builds the JSON Schema for a registry entry.
-func RegistryEntrySchema(commentsDir string) ([]byte, error) {
-	return schemaFor(&RegistryEntry{}, commentsDir, "registry.schema.json", "Dray registry entry")
-}
-
 func schemaFor(v any, commentsDir, file, title string) ([]byte, error) {
 	r := &jsonschema.Reflector{ExpandedStruct: true}
 	if commentsDir != "" {

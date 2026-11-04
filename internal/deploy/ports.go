@@ -39,8 +39,22 @@ type Builder interface {
 	Build(ctx context.Context, b BuildSpec) (digest string, err error)
 }
 
+// OwnerLabel is the label on a namespace naming the app that owns it.
+const OwnerLabel = "dray/app"
+
+// NamespaceState is what the cluster says about the deploy's namespace.
+type NamespaceState struct {
+	Exists bool
+	// Owner is the app named by the namespace's OwnerLabel, if any.
+	Owner string
+}
+
 // Cluster is a Kubernetes namespace's view of a target.
 type Cluster interface {
+	// ReadNamespace reads the namespace.
+	ReadNamespace(ctx context.Context) (NamespaceState, error)
+	// Claim creates the namespace if needed and labels it as app's.
+	Claim(ctx context.Context, app string) error
 	// Diff shows what applying docs would change; changed is false when
 	// nothing would.
 	Diff(ctx context.Context, docs []byte) (changed bool, diff string, err error)

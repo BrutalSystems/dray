@@ -122,6 +122,33 @@ func parseDeployment(data []byte) (deploy.DeploymentState, error) {
 	return st, nil
 }
 
+// ReadNamespace reads the namespace and its owner label.
+func (c *Cluster) ReadNamespace(ctx context.Context) (deploy.NamespaceState, error) {
+	out, err := c.run(ctx, nil, false, "get", "namespace", c.Namespace, "-o", "json")
+	if err != nil {
+		var e *execx.Error
+		if errors.As(err, &e) && strings.Contains(e.Stderr, "NotFound") {
+			return deploy.NamespaceState{}, nil
+		}
+		return deploy.NamespaceState{}, err
+	}
+	var ns struct {
+		Metadata struct {
+			Labels map[string]string `json:"labels"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(out, &ns); err != nil {
+		return deploy.NamespaceState{}, fmt.Errorf("reading namespace %s: %w", c.Namespace, err)
+	}
+	return deploy.NamespaceState{Exists: true, Owner: ns.Metadata.Labels[deploy.OwnerLabel]}, nil
+}
+
+// Claim creates or labels the namespace, applied server-side like the rest.
+func (c *Cluster) Claim(ctx context.Context, app string) error {
+	doc := fmt.Sprintf("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    %s: %s\n", c.Namespace, deploy.OwnerLabel, app)
+	return c.Apply(ctx, []byte(doc))
+}
+
 // Restart starts a new rollout.
 func (c *Cluster) Restart(ctx context.Context, name string) error {
 	_, err := c.run(ctx, nil, false, "rollout", "restart", "deployment/"+name)

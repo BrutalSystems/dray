@@ -68,8 +68,8 @@ func TestSecretsImport(t *testing.T) {
 }
 
 func TestSecretsNeedsAStore(t *testing.T) {
-	_, err := runSecrets(t, "--config", filepath.Join(t.TempDir(), "none.yaml"), "list")
-	if err == nil || !strings.Contains(err.Error(), "no Dray config: create") {
+	_, err := runSecrets(t, "--config", filepath.Join(t.TempDir(), "none.yaml"), "--repo", t.TempDir(), "list")
+	if err == nil || !strings.Contains(err.Error(), "no secret store: set secret_store") {
 		t.Fatalf("got %v", err)
 	}
 }

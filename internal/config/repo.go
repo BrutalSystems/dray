@@ -3,11 +3,14 @@
 // entry (where an app may go and who approves it).
 package config
 
-// RepoConfig is a repo's .dray/config.yaml: what to build and what to deploy.
-// It says nothing about clusters, accounts or approvals; those live in the
-// app's registry entry.
+// RepoConfig is a repo's .dray/config.yaml: everything Dray needs to build
+// and deploy the app, so anyone who clones the repo and has the access can
+// deploy it. Credentials are never part of it. Changes to it should need the
+// owner's review (CODEOWNERS on .dray/), and Dray reads where an app may
+// deploy from the main branch only.
 type RepoConfig struct {
-	// Name is the app's name. It must match the app's registry entry.
+	// Name is the app's name; it is also the first segment of its secret:
+	// references and the owner label on its namespaces.
 	Name string `json:"name" jsonschema:"pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$,maxLength=63"`
 	// Images are built from this repo.
 	Images []Image `json:"images,omitempty"`
@@ -19,6 +22,14 @@ type RepoConfig struct {
 	Secrets []Secret `json:"secrets,omitempty"`
 	// Pilets are Piral micro-frontends published to a feed.
 	Pilets *Pilets `json:"pilets,omitempty"`
+	// Environments are where the app deploys, by name (dev, staging, prod).
+	Environments map[string]Environment `json:"environments,omitempty"`
+	// Targets are the clusters the environments name.
+	Targets map[string]Target `json:"targets,omitempty"`
+	// SecretStore is where the secret: references live.
+	SecretStore *SecretStore `json:"secret_store,omitempty"`
+	// ThirdParty lists upstream images the app may run, mirrored by digest (D17).
+	ThirdParty []string `json:"third_party,omitempty"`
 }
 
 // Image is a container image built from this repo.

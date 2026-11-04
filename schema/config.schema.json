@@ -60,6 +60,89 @@
       "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
       "description": "A duration such as 600s or 10m."
     },
+    "Environment": {
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target names an entry in targets: the cluster and cloud account."
+        },
+        "namespace": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "Namespace is the Kubernetes namespace."
+        },
+        "namespace_mode": {
+          "type": "string",
+          "enum": [
+            "owned",
+            "shared"
+          ],
+          "description": "NamespaceMode is owned (the default: Dray labels the namespace as this\napp's and refuses other apps there) or shared with other apps, which\nthen may change only resources they own."
+        },
+        "release": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "gitops",
+            "feed"
+          ],
+          "description": "Release is how changes reach the environment."
+        },
+        "approval": {
+          "type": "string",
+          "enum": [
+            "none",
+            "passkey",
+            "chat"
+          ],
+          "description": "Approval is who must say yes before a change applies. Dray's own\nsettings can require more for an environment; a repo cannot require less."
+        },
+        "ci_required": {
+          "type": "boolean",
+          "description": "CIRequired refuses to deploy a commit unless CI passed on it."
+        },
+        "allow_dirty": {
+          "type": "boolean",
+          "description": "AllowDirty lets an operator's CLI deploy uncommitted changes here, for\na dev environment. Never set it for production."
+        },
+        "on_merge": {
+          "type": "string",
+          "enum": [
+            "off",
+            "deploy"
+          ],
+          "description": "OnMerge deploys when CI finishes green on the main branch; for an\nenvironment that needs approval it only opens the request."
+        },
+        "promote_from": {
+          "type": "string",
+          "description": "PromoteFrom is the environment whose verified artifact this one takes."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "target",
+        "namespace",
+        "release",
+        "approval"
+      ],
+      "description": "Environment is one place the app deploys to."
+    },
+    "FileStore": {
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Dir holds the files; a leading ~/ is the home folder."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "dir"
+      ],
+      "description": "FileStore is a folder of secret files, for local development."
+    },
     "Image": {
       "properties": {
         "name": {
@@ -106,6 +189,33 @@
         "name"
       ],
       "description": "Image is a container image built from this repo."
+    },
+    "OpenBaoStore": {
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "Address is the server; defaults to BAO_ADDR, then VAULT_ADDR."
+        },
+        "mount": {
+          "type": "string",
+          "description": "Mount is the KV engine's mount; defaults to secret."
+        },
+        "layout": {
+          "type": "string",
+          "description": "Layout places secret:\u003capp\u003e/\u003cname\u003e in the mount, such as\n{client}/{app}/{env}/{name}; defaults to {app}/{name}."
+        },
+        "client": {
+          "type": "string",
+          "description": "Client fills {client} in the layout."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace is the OpenBao namespace, when the server uses them."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "OpenBaoStore is an OpenBao (or Vault) KV version 2 engine."
     },
     "Pilets": {
       "properties": {
@@ -162,6 +272,64 @@
       "type": "string",
       "pattern": "^secret:[a-z0-9][-a-z0-9_.]*(/[a-z0-9][-a-z0-9_.]*)+(#[A-Za-z_][A-Za-z0-9_.-]*)?$",
       "description": "A secret in the secret store: secret:\u003cscope\u003e/\u003cname\u003e, optionally #\u003ckey\u003e."
+    },
+    "SecretStore": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "openbao",
+            "file"
+          ],
+          "description": "Type is the adapter: openbao or file."
+        },
+        "openbao": {
+          "$ref": "#/$defs/OpenBaoStore"
+        },
+        "file": {
+          "$ref": "#/$defs/FileStore"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "description": "SecretStore says where the repo's secret: references live."
+    },
+    "Target": {
+      "properties": {
+        "cloud": {
+          "type": "string",
+          "enum": [
+            "aws"
+          ],
+          "description": "Cloud is the cloud provider."
+        },
+        "account": {
+          "type": "string",
+          "description": "Account is the cloud account ID; images are pushed to its registry."
+        },
+        "region": {
+          "type": "string",
+          "description": "Region is the cloud region."
+        },
+        "cluster": {
+          "type": "string",
+          "description": "Cluster is the Kubernetes cluster, used as the kube context name unless\na person's own settings map it to another."
+        },
+        "platform": {
+          "type": "string",
+          "description": "Platform is the build platform, such as linux/arm64."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cloud",
+        "cluster"
+      ],
+      "description": "Target is a cluster in a cloud account."
     },
     "Use": {
       "properties": {
@@ -273,7 +441,7 @@
       "type": "string",
       "maxLength": 63,
       "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-      "description": "Name is the app's name. It must match the app's registry entry."
+      "description": "Name is the app's name; it is also the first segment of its secret:\nreferences and the owner label on its namespaces."
     },
     "images": {
       "items": {
@@ -306,6 +474,31 @@
     "pilets": {
       "$ref": "#/$defs/Pilets",
       "description": "Pilets are Piral micro-frontends published to a feed."
+    },
+    "environments": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Environment"
+      },
+      "type": "object",
+      "description": "Environments are where the app deploys, by name (dev, staging, prod)."
+    },
+    "targets": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Target"
+      },
+      "type": "object",
+      "description": "Targets are the clusters the environments name."
+    },
+    "secret_store": {
+      "$ref": "#/$defs/SecretStore",
+      "description": "SecretStore is where the secret: references live."
+    },
+    "third_party": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "ThirdParty lists upstream images the app may run, mirrored by digest (D17)."
     }
   },
   "additionalProperties": false,
@@ -314,5 +507,5 @@
     "name"
   ],
   "title": "Dray repo config (.dray/config.yaml)",
-  "description": "RepoConfig is a repo's .dray/config.yaml: what to build and what to deploy."
+  "description": "RepoConfig is a repo's .dray/config.yaml: everything Dray needs to build and deploy the app, so anyone who clones the repo and has the access can deploy it."
 }

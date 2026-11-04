@@ -10,8 +10,3 @@ import _ "embed"
 //
 //go:embed config.schema.json
 var Config []byte
-
-// Registry is the JSON Schema for a registry entry.
-//
-//go:embed registry.schema.json
-var Registry []byte

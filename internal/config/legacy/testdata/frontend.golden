@@ -26,10 +26,6 @@ pilets:
     - --pilet
     - '{name}'
   env: secret:shop-web/pilets
-
-# --- registry entry
-name: shop-web
-repo: example/frontend
 environments:
   prod:
     target: main-cluster
@@ -37,19 +33,21 @@ environments:
     namespace_mode: shared
     release: direct
     approval: none
+targets:
+  main-cluster:
+    cloud: aws
+    account: "111111111111"
+    region: us-east-2
+    cluster: main-cluster
+    platform: linux/arm64
 
-# --- target main-cluster
-name: main-cluster
-cloud: aws
-account: "111111111111"
-region: us-east-2
-cluster: main-cluster
-profile: dev
-platform: linux/arm64
-
+# --- personal AWS profile
+dev
 # --- warnings
 - images[0] shop-web: bakes environment settings in at build time, so it is rebuilt per environment instead of promoted (D13)
 - pilets: publish values from secrets.env now come from secret:shop-web/pilets; import them with dray secrets import
-- registry: the prod environment keeps today's behavior: namespace team-a marked shared (D15), direct apply, no approval. Tighten it once the app is on Dray
+- environments: the prod environment keeps today's behavior: namespace team-a marked shared (D15), direct apply, no approval. Give the app its own namespace and tighten it once it is on Dray
+- defaults: the AWS profile dev is personal, so it is not in the repo; set it in your own Dray settings (aws_profiles) for account 111111111111
+- secret_store: set secret_store: where the secret: references live
 # --- validation
 ok
