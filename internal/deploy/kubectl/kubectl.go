@@ -22,6 +22,7 @@ const FieldManager = "dray"
 
 // Cluster is one namespace in one kube context.
 type Cluster struct {
+	// Context is the kube context; empty uses in-cluster access.
 	Context   string
 	Namespace string
 	// Run runs kubectl; nil is execx.Run.
@@ -37,7 +38,13 @@ func (c *Cluster) run(ctx context.Context, stdin []byte, stream bool, args ...st
 	if run == nil {
 		run = execx.Run
 	}
-	cmd := execx.Cmd{Name: "kubectl", Args: append(args, "-n", c.Namespace, "--context", c.Context)}
+	args = append(args, "-n", c.Namespace)
+	if c.Context != "" {
+		// Inside the cluster there is no context: kubectl uses the pod's
+		// service account.
+		args = append(args, "--context", c.Context)
+	}
+	cmd := execx.Cmd{Name: "kubectl", Args: args}
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

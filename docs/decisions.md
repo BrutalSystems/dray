@@ -223,6 +223,19 @@ serve prerelease versions unless pinned need a pin or `version: package`.
 Uncommitted changes count only inside the app's own folder, so an app in a
 subfolder of a monorepo is not blocked by changes elsewhere in the repo.
 
+## D22 · Deploy on merge first, before the rest of the server
+
+The first server feature is deploy on merge, the smallest piece that removes
+deploy credentials from people and CI. It is a GitHub App webhook receiver
+that runs the CLI's deploy code with the server's own identity. The trigger
+is `workflow_run` completed for a push to the default branch, and a commit
+deploys only when every workflow run for it has passed. Only environments
+with `release: direct` and `approval: none` deploy on merge until approvals
+exist; others get a neutral check saying so. Commits arrive as GitHub
+tarballs, not clones. There is no database yet: results live in GitHub check
+runs and the server's log, and a restart forgets which commits it handled
+(the next CI webhook re-checks).
+
 ## D12 · Scope kept for later phases
 
 Preview environments per pull request, release groups for services that ship

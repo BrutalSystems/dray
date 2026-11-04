@@ -202,7 +202,11 @@ func (r *Repo) export(ctx context.Context, repo, commit, root, folder string) er
 
 // Extract unpacks a tar stream into root. Writes go through the os.Root, so
 // no entry or symlink can place a file outside it.
-func Extract(root *os.Root, r io.Reader) error {
+func Extract(root *os.Root, r io.Reader) error { return ExtractStrip(root, r, 0) }
+
+// ExtractStrip is Extract dropping the first strip folders of every entry,
+// such as the owner-repo-sha/ folder GitHub's tarballs put everything in.
+func ExtractStrip(root *os.Root, r io.Reader, strip int) error {
 	tr := tar.NewReader(r)
 	for {
 		h, err := tr.Next()
@@ -212,7 +216,17 @@ func Extract(root *os.Root, r io.Reader) error {
 		if err != nil {
 			return err
 		}
+		if h.Typeflag == tar.TypeXGlobalHeader {
+			continue
+		}
 		name := path.Clean(h.Name)
+		for i := 0; i < strip && name != "."; i++ {
+			_, rest, ok := strings.Cut(name, "/")
+			if !ok {
+				rest = "."
+			}
+			name = rest
+		}
 		if name == "." {
 			continue
 		}

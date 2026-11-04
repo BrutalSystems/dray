@@ -1,6 +1,6 @@
-// Command dray-server is the Dray server: the MCP endpoint, the HTTP API, the
-// approval page, and the reconcile loop. It arrives in milestone M1.2; until
-// then it only reports its version.
+// Command dray-server is the Dray server. Today it deploys on merge (serve);
+// the MCP endpoint, the HTTP API, the approval page and the reconcile loop
+// follow.
 package main
 
 import (
@@ -11,7 +11,9 @@ import (
 )
 
 func main() {
-	if err := cli.NewRoot("dray-server", "Run the Dray server").Execute(); err != nil {
+	root := cli.NewRoot("dray-server", "Run the Dray server")
+	root.AddCommand(cli.NewServeCmd())
+	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

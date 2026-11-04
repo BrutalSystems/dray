@@ -1,0 +1,224 @@
+// Package server is dray-server's deploy-on-merge loop: a GitHub App webhook
+// says a CI run finished on a repo's main branch; once every CI run for that
+// commit has passed, Dray downloads the commit, reads each app's
+// .dray/config.yaml in it, and deploys every environment that sets
+// on_merge: deploy, with the same code the CLI uses. Each result is reported
+// on the commit as a GitHub check run.
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"sync"
+
+	"github.com/BrutalSystems/dray/internal/githubapp"
+)
+
+// RepoAPI is what the server needs from GitHub for one installation.
+type RepoAPI interface {
+	RunsForCommit(ctx context.Context, repo, sha string) ([]githubapp.Run, error)
+	Tarball(ctx context.Context, repo, ref string, w io.Writer) error
+	CreateCheck(ctx context.Context, repo, sha string, k githubapp.Check) (int64, error)
+	UpdateCheck(ctx context.Context, repo string, id int64, k githubapp.Check) error
+}
+
+// GitHub gives the API for an installation of the App.
+type GitHub interface {
+	Installation(id int64) RepoAPI
+}
+
+// Trigger is a commit on a repo's default branch whose CI finished.
+type Trigger struct {
+	Repo         string // owner/name
+	SHA          string
+	Installation int64
+}
+
+// Server receives webhooks and runs deploys.
+type Server struct {
+	// WebhookSecret checks every webhook's signature.
+	WebhookSecret []byte
+	GitHub        GitHub
+	// Deploy handles one trigger after its CI passed.
+	Deploy func(ctx context.Context, api RepoAPI, t Trigger)
+	Log    *slog.Logger
+
+	mu      sync.Mutex
+	queues  map[string]*queue
+	handled map[string]bool // repo@sha already taken
+	wg      sync.WaitGroup
+}
+
+type queue struct {
+	running bool
+	pending *Trigger
+}
+
+func (s *Server) log() *slog.Logger {
+	if s.Log != nil {
+		return s.Log
+	}
+	return slog.Default()
+}
+
+// Handler serves /healthz and /webhooks/github.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	mux.HandleFunc("POST /webhooks/github", s.webhook)
+	return mux
+}
+
+type workflowRunEvent struct {
+	Action      string `json:"action"`
+	WorkflowRun struct {
+		HeadBranch string `json:"head_branch"`
+		HeadSHA    string `json:"head_sha"`
+		Event      string `json:"event"`
+	} `json:"workflow_run"`
+	Repository struct {
+		FullName      string `json:"full_name"`
+		DefaultBranch string `json:"default_branch"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 25<<20))
+	if err != nil {
+		http.Error(w, "reading the body", http.StatusBadRequest)
+		return
+	}
+	if !githubapp.VerifySignature(s.WebhookSecret, body, r.Header.Get("X-Hub-Signature-256")) {
+		s.log().Warn("webhook with a bad signature refused", "delivery", r.Header.Get("X-GitHub-Delivery"))
+		http.Error(w, "bad signature", http.StatusUnauthorized)
+		return
+	}
+	switch r.Header.Get("X-GitHub-Event") {
+	case "ping":
+		_, _ = w.Write([]byte("pong\n"))
+		return
+	case "workflow_run":
+	default:
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	var ev workflowRunEvent
+	if err := json.Unmarshal(body, &ev); err != nil {
+		http.Error(w, "not a workflow_run event", http.StatusBadRequest)
+		return
+	}
+	run := ev.WorkflowRun
+	// Only pushes to the default branch deploy; pull requests and other
+	// branches never do.
+	if ev.Action != "completed" || run.Event != "push" || run.HeadBranch == "" ||
+		run.HeadBranch != ev.Repository.DefaultBranch || ev.Installation.ID == 0 || run.HeadSHA == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.Enqueue(Trigger{Repo: ev.Repository.FullName, SHA: run.HeadSHA, Installation: ev.Installation.ID})
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// Enqueue queues a trigger. Each repo deploys one commit at a time; a newer
+// trigger replaces one still waiting, so a burst of merges deploys the latest.
+func (s *Server) Enqueue(t Trigger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.queues == nil {
+		s.queues = map[string]*queue{}
+		s.handled = map[string]bool{}
+	}
+	if s.handled[t.Repo+"@"+t.SHA] {
+		return
+	}
+	q := s.queues[t.Repo]
+	if q == nil {
+		q = &queue{}
+		s.queues[t.Repo] = q
+	}
+	q.pending = &t
+	if q.running {
+		return
+	}
+	q.running = true
+	s.wg.Add(1)
+	go s.work(q)
+}
+
+func (s *Server) work(q *queue) {
+	defer s.wg.Done()
+	for {
+		s.mu.Lock()
+		t := q.pending
+		q.pending = nil
+		if t == nil {
+			q.running = false
+			s.mu.Unlock()
+			return
+		}
+		s.mu.Unlock()
+		s.handle(context.Background(), *t)
+	}
+}
+
+// Wait waits for every queued deploy to finish, for tests and shutdown.
+func (s *Server) Wait() { s.wg.Wait() }
+
+// handle deploys a trigger once every CI run for its commit has passed. A run
+// still going means another webhook will come; a failed one means no deploy.
+func (s *Server) handle(ctx context.Context, t Trigger) {
+	log := s.log().With("repo", t.Repo, "sha", t.SHA)
+	api := s.GitHub.Installation(t.Installation)
+	runs, err := api.RunsForCommit(ctx, t.Repo, t.SHA)
+	if err != nil {
+		log.Error("cannot read CI runs; not deploying", "err", err)
+		return
+	}
+	switch verdict(runs) {
+	case "pending":
+		log.Info("CI still running; waiting for its next webhook")
+		return
+	case "failed":
+		log.Info("CI failed; not deploying")
+		s.markHandled(t)
+		return
+	}
+	s.markHandled(t)
+	log.Info("CI passed; deploying")
+	s.Deploy(ctx, api, t)
+}
+
+func (s *Server) markHandled(t Trigger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handled[t.Repo+"@"+t.SHA] = true
+}
+
+var passing = map[string]bool{"success": true, "skipped": true, "neutral": true}
+
+// verdict is green, pending or failed for one commit's runs. No runs at all
+// is pending: the webhook that woke us belongs to a run GitHub will list.
+func verdict(runs []githubapp.Run) string {
+	if len(runs) == 0 {
+		return "pending"
+	}
+	for _, r := range runs {
+		if r.Status != "completed" {
+			return "pending"
+		}
+	}
+	for _, r := range runs {
+		if !passing[r.Conclusion] {
+			return "failed"
+		}
+	}
+	return "green"
+}
