@@ -528,3 +528,18 @@ func TestComponentDeploysTheRegistrysImage(t *testing.T) {
 		t.Errorf("applied:\n%s", h.appliedText())
 	}
 }
+
+// A Deployment the apply created or changed is never restarted, even when it
+// has finished rolling out by the time Dray gets to it.
+func TestNoRestartAfterTheApplyStartedARollout(t *testing.T) {
+	h := newHarness(t)
+	done := DeploymentState{Found: true, Generation: 3, ObservedGeneration: 3, Replicas: 1, Updated: 1, Available: 1}
+	h.cl.state["api"] = []DeploymentState{{}, done}                                                                                         // created by the apply
+	h.cl.state["web"] = []DeploymentState{{Found: true, Generation: 2, ObservedGeneration: 2, Replicas: 1, Updated: 1, Available: 1}, done} // spec changed
+	if err := h.run(t); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.cl.restarted) != 0 || strings.Join(h.cl.waited, ",") != "api,web" {
+		t.Errorf("restarted %v, waited %v", h.cl.restarted, h.cl.waited)
+	}
+}

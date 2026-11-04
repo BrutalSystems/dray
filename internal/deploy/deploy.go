@@ -107,6 +107,8 @@ type state struct {
 	docs    map[string][]byte // workload -> rendered manifests
 	// problems found by a dry run, which reports them and carries on.
 	problems []string
+	// before is each Deployment's state just before the apply.
+	before map[string]DeploymentState
 }
 
 // problem stops a real deploy; a dry run reports it and goes on.
@@ -131,7 +133,7 @@ func Run(ctx context.Context, o Options) error {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	s := &state{o: o, secrets: map[string][]byte{}, changed: map[string]bool{}, docs: map[string][]byte{}}
+	s := &state{o: o, secrets: map[string][]byte{}, changed: map[string]bool{}, docs: map[string][]byte{}, before: map[string]DeploymentState{}}
 	steps := []func(context.Context) error{
 		s.selectWorkloads, s.checkSource, s.gate, s.planImages, s.readSecrets,
 	}
@@ -549,6 +551,19 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 func (s *state) apply(ctx context.Context) error {
+	// Note each Deployment's generation before anything is applied: the
+	// rollout step compares against it to tell whether the apply itself
+	// started a rollout.
+	for _, w := range s.work {
+		if w.Kind != config.KindDeployment {
+			continue
+		}
+		st, err := s.o.Cluster.Deployment(ctx, w.Name)
+		if err != nil {
+			return err
+		}
+		s.before[w.Name] = st
+	}
 	for _, n := range sortedKeys(s.secrets) {
 		if !s.changed["secret/"+n] {
 			continue
@@ -570,9 +585,10 @@ func (s *state) apply(ctx context.Context) error {
 	return nil
 }
 
-// rollout waits for each Deployment that changed. A Deployment the apply did
-// not already start rolling (only a config map, service or secret changed, or
-// --restart) is restarted first; one already rolling is only waited on.
+// rollout waits for each Deployment that changed. A Deployment whose rollout
+// the apply did not start (only a config map, service or secret changed, or
+// --restart) is restarted first, unless it is rolling already; one the apply
+// created or changed is only waited on.
 func (s *state) rollout(ctx context.Context) error {
 	var unfinished []string
 	for _, w := range s.work {
@@ -594,7 +610,13 @@ func (s *state) rollout(ctx context.Context) error {
 			s.printf("! workload %s: no Deployment named %s in the namespace; nothing to roll out", w.Name, w.Name)
 			continue
 		}
-		if !st.Rolling() {
+		// The apply started a rollout when it created the Deployment or
+		// changed its spec (the generation moved). Asking only whether it is
+		// still rolling is not enough: by the time an earlier workload has
+		// rolled out, this one may have finished too.
+		b := s.before[w.Name]
+		started := !b.Found || st.Generation > b.Generation
+		if !started && !st.Rolling() {
 			if err := s.o.Cluster.Restart(ctx, w.Name); err != nil {
 				return err
 			}
