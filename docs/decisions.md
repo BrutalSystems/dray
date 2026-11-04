@@ -85,6 +85,57 @@ database cannot edit. An adopter only needs a Postgres connection string.
 - An image already built for a commit is reused, not rebuilt.
 - Builders run on arm64 when the clusters do.
 
+## D13 · Front ends with build-time settings: per-environment builds now, runtime settings over time
+
+Bundlers such as Vite write environment values into the bundle at build time,
+so promoting one image from staging to prod would ship staging's settings.
+An image that declares per-environment build settings is rebuilt for each
+environment from the same commit, and the plan says "rebuilt", not
+"promoted". The goal for every front end is runtime settings (a config file
+written at container start), which restores build-once promotion; each repo
+moves when convenient, and its config says which mode it uses. Anything in a
+browser bundle is public, so secrets never belong in front-end build settings.
+
+## D14 · Shared services publish versions; apps pin one
+
+A service used by several apps is registered as a component. Dray builds it
+when its repo gets a version tag, behind that repo's own CI gate, and keeps
+one image per version; a component never deploys on its own. A consuming app
+says `uses: <component>@<version>` instead of cloning and building it, and
+Dray fills that version's digest into the app's own manifests. Upgrading is a
+one-line change in a pull request, so shipping an app never upgrades a shared
+service by accident. Dray shows which app runs which version and can open
+upgrade pull requests. `dray config migrate` pins each app to the version it
+runs today.
+
+## D15 · Shared namespaces are allowed, with an ownership rule; new apps get their own
+
+An app migrated from the JS tool keeps its namespace, which the registry
+marks `shared`. Dray stamps every resource with its owning app, and a Kyverno
+rule lets an app change only resources it owns. Requests and limits are
+required so one app cannot starve its neighbours, and network rules select
+pods per app. Every new app gets its own namespace, and existing apps move out
+one at a time, stateless ones first.
+
+## D16 · Deploy-on-merge is driven by Dray, off by default
+
+Dray's GitHub App receives repository events. When CI finishes green on the
+main branch, Dray plans and applies to every environment whose registry entry
+sets `on_merge: deploy`; the finished run is the CI gate. For an environment
+that needs approval, on-merge only opens the approval request. GitHub
+workflows need no deploy step and hold no deploy credentials. Pilets can
+publish when their version changes the same way.
+
+## D17 · Third-party images are mirrored into the cluster's registry by digest
+
+The registry lists approved upstream images. When a manifest names one by
+tag, Dray resolves the tag to a digest, copies that image into the target's
+container registry once, and rewrites the manifest to the mirrored digest;
+the plan shows the rewrite. The policy stays absolute: every image that runs
+was built or mirrored by Dray and is pinned by digest. Dray does the copy
+itself, so no upstream registry credential is stored and the same flow works
+on any cloud's registry.
+
 ## D12 · Scope kept for later phases
 
 Preview environments per pull request, release groups for services that ship
