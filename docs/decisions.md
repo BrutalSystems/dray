@@ -46,7 +46,10 @@ Cross-cloud access federates the cluster's service-account tokens.
 
 The GitHub App's private key is an ordinary secret in the configured store.
 Dray mints installation tokens scoped to one job; only `dray-server` can read
-the key; the key rotates on a schedule.
+the key; the key rotates on a schedule. GitHub has no API for creating an
+App's private keys, so rotation is an operator task done in the browser (new
+key stored, checked, then the old one deleted), not something the server
+does by itself.
 
 ## D8 · Dray issues its own MCP tokens; sign-in through OIDC
 
