@@ -11,7 +11,7 @@ import (
 
 func main() {
 	root := cli.NewRoot("dray", "Deploy code from Git to its targets")
-	root.AddCommand(cli.NewConfigCmd())
+	root.AddCommand(cli.NewConfigCmd(), cli.NewRenderCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
