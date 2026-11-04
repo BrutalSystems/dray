@@ -17,6 +17,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/BrutalSystems/dray/internal/config"
+	"github.com/BrutalSystems/dray/internal/deploy"
+	"github.com/BrutalSystems/dray/internal/deploy/buildkit"
 	"github.com/BrutalSystems/dray/internal/deploy/docker"
 	"github.com/BrutalSystems/dray/internal/deploy/ecr"
 	"github.com/BrutalSystems/dray/internal/deploy/kubectl"
@@ -38,6 +40,8 @@ func NewServeCmd() *cobra.Command {
 			"  DRAY_GITHUB_APP_ID          the GitHub App's ID\n" +
 			"  DRAY_GITHUB_APP_KEY_FILE    its private key (PEM)\n" +
 			"  DRAY_WEBHOOK_SECRET_FILE    its webhook secret\n" +
+			"  DRAY_BUILDKIT_ADDR          the BuildKit daemon, such as tcp://buildkitd:1234\n" +
+			"                              (without it, the local Docker builds)\n" +
 			"AWS, Kubernetes and the secret store use the pod's own identity.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -113,9 +117,21 @@ func inClusterAdapters(c *config.RepoConfig, env string, e config.Environment, t
 	if t.Cloud != "aws" {
 		return server.Adapters{}, fmt.Errorf("target cloud %q is not supported", t.Cloud)
 	}
+	reg := &ecr.Registry{Account: t.Account, Region: t.Region}
+	var builder deploy.Builder = &docker.Builder{Progress: out}
+	if addr := os.Getenv("DRAY_BUILDKIT_ADDR"); addr != "" {
+		// No Docker in the server's image: the registry login goes into a
+		// config file that buildctl hands to the daemon for the push.
+		dir, err := os.MkdirTemp("", "dray-docker-")
+		if err != nil {
+			return server.Adapters{}, err
+		}
+		reg.DockerConfig = dir
+		builder = &buildkit.Builder{Addr: addr, DockerConfig: dir, Progress: out}
+	}
 	ad := server.Adapters{
-		Registry: &ecr.Registry{Account: t.Account, Region: t.Region},
-		Builder:  &docker.Builder{Progress: out},
+		Registry: reg,
+		Builder:  builder,
 		Cluster:  &kubectl.Cluster{Namespace: e.Namespace, Progress: out},
 	}
 	if c.SecretStore != nil {

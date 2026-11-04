@@ -2,7 +2,11 @@ package ecr
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -91,5 +95,38 @@ func TestLoginKeepsPasswordOffTheCommandLine(t *testing.T) {
 	if strings.Contains(login.cmd.String(), "pw123") || login.stdin != "pw123" ||
 		login.cmd.String() != "docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-2.amazonaws.com" {
 		t.Errorf("login %q stdin %q", login.cmd.String(), login.stdin)
+	}
+}
+
+func TestLoginWritesDockerConfig(t *testing.T) {
+	var calls []call
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"auths":{"other.example.com":{"auth":"eA=="}},"credsStore":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := &Registry{Account: "123456789012", Region: "us-east-2", DockerConfig: dir}
+	r.Run = runner(map[string]func() ([]byte, error){
+		"aws ecr get-login-password": func() ([]byte, error) { return []byte("pw123\n"), nil },
+	}, &calls)
+	if err := r.Login(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Errorf("docker was run: %v", calls)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "config.json")) //nolint:gosec // test
+	var cfg struct {
+		Auths      map[string]map[string]string `json:"auths"`
+		CredsStore string                       `json:"credsStore"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auths["123456789012.dkr.ecr.us-east-2.amazonaws.com"]["auth"] != base64.StdEncoding.EncodeToString([]byte("AWS:pw123")) ||
+		cfg.Auths["other.example.com"]["auth"] != "eA==" || cfg.CredsStore != "x" {
+		t.Errorf("config %s", data)
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "config.json")); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", fi.Mode())
 	}
 }

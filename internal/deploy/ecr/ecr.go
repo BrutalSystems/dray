@@ -5,8 +5,12 @@ package ecr
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/BrutalSystems/dray/internal/deploy"
@@ -19,6 +23,10 @@ type Registry struct {
 	Region  string
 	// Profile is a local credentials profile; empty uses the environment's.
 	Profile string
+	// DockerConfig, when set, makes Login write the registry login into
+	// <DockerConfig>/config.json itself instead of running docker login, for
+	// a builder with no Docker (the server's BuildKit).
+	DockerConfig string
 	// Run runs aws and docker; nil is execx.Run.
 	Run execx.Runner
 }
@@ -49,15 +57,49 @@ func (r *Registry) Login(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	pw = bytes.TrimSpace(pw)
+	if r.DockerConfig != "" {
+		return writeLogin(r.DockerConfig, r.Host(), "AWS", pw)
+	}
 	run := r.Run
 	if run == nil {
 		run = execx.Run
 	}
 	_, err = run(ctx, execx.Cmd{
 		Name: "docker", Args: []string{"login", "--username", "AWS", "--password-stdin", r.Host()},
-		Stdin: bytes.NewReader(bytes.TrimSpace(pw)),
+		Stdin: bytes.NewReader(pw),
 	})
 	return err
+}
+
+// writeLogin sets host's login in dir/config.json, keeping other entries.
+// The file is the user's alone (0600).
+func writeLogin(dir, host, user string, pw []byte) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "config.json")
+	cfg := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // the configured folder
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	auths, _ := cfg["auths"].(map[string]any)
+	if auths == nil {
+		auths = map[string]any{}
+	}
+	auths[host] = map[string]any{"auth": base64.StdEncoding.EncodeToString(append([]byte(user+":"), pw...))}
+	cfg["auths"] = auths
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func stderrHas(err error, s string) bool {
