@@ -32,6 +32,7 @@ import (
 	"github.com/BrutalSystems/dray/internal/config"
 	"github.com/BrutalSystems/dray/internal/render"
 	"github.com/BrutalSystems/dray/internal/secrets"
+	"github.com/BrutalSystems/dray/internal/validate"
 )
 
 // DefaultRolloutTimeout matches Kubernetes' own progress deadline. Waiting
@@ -72,6 +73,9 @@ type Options struct {
 	// Secrets is the secret store; needed only when a workload uses secrets
 	// or an image takes build arguments from one.
 	Secrets secrets.Store
+	// Checker checks rendered manifests before they are applied; nil skips
+	// the check.
+	Checker Checker
 	// Now is the clock, for dirty build tags.
 	Now func() time.Time
 }
@@ -105,6 +109,7 @@ type state struct {
 	secrets map[string][]byte // name -> Secret manifest
 	changed map[string]bool   // workload or "secret/<name>" -> apply changes it
 	docs    map[string][]byte // workload -> rendered manifests
+	files   map[string][]render.Manifest
 	// problems found by a dry run, which reports them and carries on.
 	problems []string
 	// before is each Deployment's state just before the apply.
@@ -139,10 +144,14 @@ func Run(ctx context.Context, o Options) error {
 	steps := []func(context.Context) error{
 		s.selectWorkloads, s.checkSource, s.gate, s.checkNamespace, s.planImages, s.readSecrets,
 	}
+	// Render and check before building, so a bad manifest stops the deploy in
+	// seconds rather than after the builds; a real deploy renders again once
+	// the images' digests are known.
+	steps = append(steps, s.render, s.check)
 	if !o.DryRun {
-		steps = append(steps, s.build)
+		steps = append(steps, s.build, s.render)
 	}
-	steps = append(steps, s.render, s.diff)
+	steps = append(steps, s.diff)
 	if !o.DryRun {
 		steps = append(steps, s.apply, s.rollout)
 	}
@@ -488,6 +497,36 @@ func (s *state) readSecrets(ctx context.Context) error {
 	return nil
 }
 
+// Checker checks one rendered manifest file.
+type Checker interface {
+	Check(file string, content []byte) []validate.Finding
+}
+
+// check runs the Checker on every rendered manifest. An error stops a deploy
+// before anything is applied (a dry run reports it and goes on); a warning is
+// shown.
+func (s *state) check(context.Context) error {
+	if s.o.Checker == nil {
+		return nil
+	}
+	var errs []string
+	for _, w := range s.work {
+		for _, m := range s.files[w.Name] {
+			for _, f := range s.o.Checker.Check(m.Path, m.Content) {
+				if f.Error {
+					errs = append(errs, f.String())
+				} else {
+					s.printf("! %s", f)
+				}
+			}
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return s.problem(fmt.Errorf("the manifests have %d problem(s):\n    %s", len(errs), strings.Join(errs, "\n    ")))
+}
+
 func (s *state) render(context.Context) error {
 	refs := map[string]string{}
 	for _, img := range s.images {
@@ -506,6 +545,10 @@ func (s *state) render(context.Context) error {
 			return err
 		}
 		s.docs[w.Name] = buf.Bytes()
+		if s.files == nil {
+			s.files = map[string][]render.Manifest{}
+		}
+		s.files[w.Name] = res.Manifests
 	}
 	return nil
 }

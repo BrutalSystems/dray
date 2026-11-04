@@ -255,6 +255,30 @@ image's cache is kept in the registry (`dray-cache/<repo>`, mutable tags,
 while image repositories stay immutable). A pod a crashed server leaves
 behind ends after two hours, and its node with it.
 
+## D24 · Manifest checks: kubeconform as a library, Kyverno as a pinned CLI (Q10)
+
+Every rendered manifest is checked before it is applied. Schemas come first:
+kubeconform, as a Go library (28 packages), checks each object strictly
+against Kubernetes' own schemas for the target's `kubernetes_version`, and
+common custom resources against a community catalog. A deploy renders and
+checks before it builds, so a bad manifest stops it in seconds; a kind with
+no schema anywhere is a warning. `dray check` runs the same on a repo with no
+cluster or credentials, for CI.
+
+Policies use Kyverno, as the pinned Kyverno CLI run as a separate program,
+not as a library. Importing Kyverno's engine pulls in 338 modules and about
+2,500 packages (all of Dray was 274), including cosign, notation and
+Kubernetes server code, and it does not build without copying Kyverno's own
+pinned forks of Kubernetes packages. The CLI is one 261 MB binary, ran both
+policies over all 20 parity apps in under a second, and its policy files are
+the ones a cluster's admission controller would enforce. The policies are in
+`deploy/policies/`: images pinned by digest (D4), and CPU and memory
+requests plus a memory limit on every container (D15). On the parity set,
+all 20 apps pass the requests-and-limits policy; 8 workloads fail the digest
+policy, all images written into manifests by tag (third-party images, and
+two apps' own images by `:latest` or a fixed tag), which D17's mirroring is
+for.
+
 ## D12 · Scope kept for later phases
 
 Preview environments per pull request, release groups for services that ship

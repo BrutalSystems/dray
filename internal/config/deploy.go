@@ -44,6 +44,9 @@ type Target struct {
 	Cluster string `json:"cluster"`
 	// Platform is the build platform, such as linux/arm64.
 	Platform string `json:"platform,omitempty"`
+	// KubernetesVersion picks the schemas manifests are checked against, such
+	// as 1.36.0; empty checks against the newest.
+	KubernetesVersion string `json:"kubernetes_version,omitempty"`
 }
 
 // SecretStore says where the repo's secret: references live.

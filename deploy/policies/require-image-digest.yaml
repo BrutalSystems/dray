@@ -1,0 +1,21 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-image-digest
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: images-by-digest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Images must be pinned by digest (image@sha256:...), never by tag (D4)."
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "*@sha256:*"
+            containers:
+              - image: "*@sha256:*"

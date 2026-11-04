@@ -12,6 +12,7 @@ import (
 
 	"github.com/BrutalSystems/dray/internal/config"
 	"github.com/BrutalSystems/dray/internal/secrets"
+	"github.com/BrutalSystems/dray/internal/validate"
 )
 
 const digestA = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -611,4 +612,53 @@ func TestBuilderIsClosedAfterTheBuilds(t *testing.T) {
 	if len(cb.built) != 2 || cb.closed != 1 {
 		t.Errorf("built %d, closed %d", len(cb.built), cb.closed)
 	}
+}
+
+type fakeChecker struct{ findings map[string][]validate.Finding }
+
+func (c fakeChecker) Check(file string, _ []byte) []validate.Finding { return c.findings[file] }
+
+func TestManifestCheck(t *testing.T) {
+	bad := fakeChecker{findings: map[string][]validate.Finding{
+		"k8s/api.yaml": {{File: "k8s/api.yaml", Object: "Deployment/api", Message: "spec.replicas: expected integer", Error: true}},
+		"k8s/web.yaml": {{File: "k8s/web.yaml", Object: "Widget/w", Message: "no schema for this kind; not checked"}},
+	}}
+	t.Run("an error stops the deploy before any build", func(t *testing.T) {
+		h := newHarness(t)
+		h.o.Checker = bad
+		err := h.run(t)
+		if err == nil || !strings.Contains(err.Error(), "Deployment/api: spec.replicas: expected integer") {
+			t.Fatalf("got %v", err)
+		}
+		if len(h.b.built)+len(h.cl.applied) != 0 {
+			t.Error("built or applied despite a bad manifest")
+		}
+	})
+	t.Run("a dry run reports it", func(t *testing.T) {
+		h := newHarness(t)
+		h.o.Checker, h.o.DryRun = bad, true
+		if err := h.run(t); err == nil || !strings.Contains(err.Error(), "1 problem(s)") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a warning is shown and the deploy goes on", func(t *testing.T) {
+		h := newHarness(t)
+		h.o.Checker = fakeChecker{findings: map[string][]validate.Finding{"k8s/web.yaml": bad.findings["k8s/web.yaml"]}}
+		if err := h.run(t); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(h.out.String(), "! k8s/web.yaml Widget/w: no schema") {
+			t.Errorf("warning not shown:\n%s", h.out)
+		}
+	})
+	t.Run("the applied manifests carry the built digests", func(t *testing.T) {
+		h := newHarness(t)
+		h.o.Checker = fakeChecker{}
+		if err := h.run(t); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(h.appliedText(), "shop-api:1234567@"+digestB) {
+			t.Errorf("second render missing:\n%s", h.appliedText())
+		}
+	})
 }

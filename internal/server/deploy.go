@@ -29,6 +29,8 @@ type Adapters struct {
 	Cluster  deploy.Cluster
 	// Secrets may be nil when the app uses none.
 	Secrets secrets.Store
+	// Checker checks the rendered manifests; nil skips it.
+	Checker deploy.Checker
 }
 
 // AdapterFactory makes the adapters for an app's environment. out receives
@@ -133,7 +135,7 @@ func (d *Deployer) deployEnv(ctx context.Context, api RepoAPI, t Trigger, root, 
 	}
 	o := deploy.Options{
 		Repo: c, RepoDir: appDir, EnvName: envName, Env: env, Target: c.Targets[env.Target], Out: &out,
-		Registry: ad.Registry, Builder: ad.Builder, Cluster: ad.Cluster, Secrets: ad.Secrets,
+		Registry: ad.Registry, Builder: ad.Builder, Cluster: ad.Cluster, Secrets: ad.Secrets, Checker: ad.Checker,
 		Source: &commitSource{api: api, sha: t.SHA, root: root, app: appDir, sources: sourcesOf(c)},
 		CI:     &commitCI{sha: t.SHA, runs: runs},
 	}

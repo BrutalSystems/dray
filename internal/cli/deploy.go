@@ -17,11 +17,13 @@ import (
 	"github.com/BrutalSystems/dray/internal/deploy/gitsrc"
 	"github.com/BrutalSystems/dray/internal/deploy/kubectl"
 	"github.com/BrutalSystems/dray/internal/secrets"
+	"github.com/BrutalSystems/dray/internal/validate"
 )
 
 // deployFlags are dray deploy's flags.
 type deployFlags struct {
 	cfgPath, env, repoConfig, awsProfile string
+	skipChecks                           bool
 	workloads                            []string
 	dryRun, allowDirty, skipCI, restart  bool
 }
@@ -57,6 +59,7 @@ func NewDeployCmd() *cobra.Command {
 	fl := cmd.Flags()
 	fl.StringVar(&f.cfgPath, "config", "", "your own settings file (default $DRAY_CONFIG or ~/.config/dray/config.yaml)")
 	fl.StringVar(&f.env, "env", "", "environment to deploy to (default: the app's only environment)")
+	fl.BoolVar(&f.skipChecks, "skip-checks", false, "don't check the manifests against Kubernetes' schemas (offline)")
 	fl.StringVar(&f.awsProfile, "aws-profile", "", "AWS profile for this deploy, instead of the one your settings give the account")
 	fl.StringVar(&f.repoConfig, "repo-config", "", "read the repo's config from this file instead of .dray/config.yaml, to try a repo before it moves")
 	fl.StringArrayVar(&f.workloads, "workload", nil, "deploy only this workload (repeatable; a manual workload ships only when named)")
@@ -127,6 +130,13 @@ func runDeploy(cmd *cobra.Command, dir string, f deployFlags) error {
 		Source:   &gitsrc.Repo{Dir: repoDir, Folder: repoFolder(repoDir), Sources: buildSources(c), Log: out},
 		CI:       &ghci.CI{Dir: repoDir},
 		Secrets:  store,
+	}
+	if !f.skipChecks {
+		checker, err := validate.New(validate.Options{KubernetesVersion: target.KubernetesVersion})
+		if err != nil {
+			return err
+		}
+		o.Checker = checker
 	}
 	_, _ = fmt.Fprintf(out, "Deploying %s to %s (namespace %s on %s)\n\n", c.Name, envName, env.Namespace, target.Cluster)
 	return deploy.Run(cmd.Context(), o)

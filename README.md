@@ -41,6 +41,8 @@ make snapshot   # goreleaser: every platform into dist/
 | `internal/render` | Filling image placeholders in a workload's manifests; parity test against the JS tool |
 | `internal/deploy` | The deploy: plan, build, apply, roll out, with the JS tool's safety rules as tests; adapters in `docker/`, `ecr/`, `kubectl/`, `gitsrc/`, `ghci/` |
 | `internal/execx` | Running external programs without a shell |
+| `internal/validate` | Checking rendered manifests against Kubernetes' schemas (kubeconform) |
+| `deploy/policies/` | Kyverno policies for rendered manifests (D24) |
 | `internal/server` | Deploy on merge: GitHub webhooks, the CI check, one deploy per repo at a time, results as check runs |
 | `internal/githubapp` | GitHub as a GitHub App over plain HTTP: webhook signatures, installation tokens, runs, tarballs, checks |
 | `internal/pilet` | Building, packing, versioning and uploading pilets |
@@ -126,6 +128,14 @@ Images are built from the commit, exported into a fresh folder with any build
 sources beside it (never the working tree), and referenced by digest. An image
 the registry already holds for the commit is reused. A rollout is undone only
 when Kubernetes reports it failed.
+
+## Checking a repo
+
+`dray check` renders every workload of a repo (images as placeholders) and
+checks each manifest against Kubernetes' schemas, with no cluster or
+credentials, so CI can run it. `dray deploy` runs the same check before it
+builds anything; `--skip-checks` turns it off when offline. A target's
+`kubernetes_version` picks the schemas.
 
 ## Publishing pilets
 

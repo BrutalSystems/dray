@@ -359,6 +359,10 @@
         "platform": {
           "type": "string",
           "description": "Platform is the build platform, such as linux/arm64."
+        },
+        "kubernetes_version": {
+          "type": "string",
+          "description": "KubernetesVersion picks the schemas manifests are checked against, such\nas 1.36.0; empty checks against the newest."
         }
       },
       "additionalProperties": false,

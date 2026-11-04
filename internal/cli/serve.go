@@ -25,6 +25,7 @@ import (
 	"github.com/BrutalSystems/dray/internal/secrets/openbao"
 	"github.com/BrutalSystems/dray/internal/secrets/stores"
 	"github.com/BrutalSystems/dray/internal/server"
+	"github.com/BrutalSystems/dray/internal/validate"
 )
 
 // NewServeCmd is `dray-server serve`: deploy on merge.
@@ -247,10 +248,15 @@ func inClusterAdapters(c *config.RepoConfig, env string, e config.Environment, t
 			Arch:      strings.TrimPrefix(t.Platform, "linux/"),
 		}
 	}
+	checker, err := validate.New(validate.Options{KubernetesVersion: t.KubernetesVersion})
+	if err != nil {
+		return server.Adapters{}, err
+	}
 	ad := server.Adapters{
 		Registry: reg,
 		Builder:  builder,
 		Cluster:  &kubectl.Cluster{Namespace: e.Namespace, Progress: out},
+		Checker:  checker,
 	}
 	if c.SecretStore != nil {
 		// Each app's deploy signs in as that app's own role, so it reads its
