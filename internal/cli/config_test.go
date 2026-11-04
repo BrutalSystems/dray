@@ -68,7 +68,7 @@ func TestMigrateWriteThenValidate(t *testing.T) {
 }
 
 func TestMigrateRefusesToWriteAnInvalidResult(t *testing.T) {
-	dir := writeRepo(t, `{"name":"shop","images":[{"name":"api","ecr":"api","source":{"local":true},"context":".."}],
+	dir := writeRepo(t, `{"name":"shop","images":[{"name":"api","ecr":"api","source":{"local":true},"context":"../.."}],
 	  "workloads":[{"name":"api","kind":"deployment","image":"api","manifests":["a.yaml"]}]}`)
 	_, err := runConfig(t, "config", "migrate", dir, "--write", "--repo", "example/shop", "--machine-config", filepath.Join(dir, "none.json"))
 	if err == nil || !strings.Contains(err.Error(), "not written") {

@@ -136,12 +136,15 @@ func TestBuildSources(t *testing.T) {
 	if _, err := ParseRepoConfig([]byte(ok)); err != nil {
 		t.Fatalf("a parent context with sources should be valid: %v", err)
 	}
+	// The build folder holds only the repo's checkout, named after its repository.
+	if _, err := ParseRepoConfig([]byte("name: shop\nimages:\n  - {name: api, context: ..}\n")); err != nil {
+		t.Fatalf("a parent context without sources should be valid: %v", err)
+	}
 	cases := map[string]struct{ doc, want string }{
-		"parent context, no sources": {"name: shop\nimages:\n  - {name: api, context: ..}\n", "list the other repos"},
-		"grandparent context":        {"name: shop\nimages:\n  - name: api\n    context: ../..\n    sources: [{repo: example/lib, path: lib, commit: abc1234}]\n", "must stay inside the repo"},
-		"unpinned source":            {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/lib, path: lib, commit: main}]\n", "pin a commit hash"},
-		"nested source path":         {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/lib, path: a/b, commit: abc1234}]\n", "single folder name"},
-		"same folder twice":          {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/a, path: lib, commit: abc1234}, {repo: example/b, path: lib, commit: abc1234}]\n", "used twice"},
+		"grandparent context": {"name: shop\nimages:\n  - name: api\n    context: ../..\n    sources: [{repo: example/lib, path: lib, commit: abc1234}]\n", "must stay inside the repo"},
+		"unpinned source":     {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/lib, path: lib, commit: main}]\n", "pin a commit hash"},
+		"nested source path":  {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/lib, path: a/b, commit: abc1234}]\n", "single folder name"},
+		"same folder twice":   {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/a, path: lib, commit: abc1234}, {repo: example/b, path: lib, commit: abc1234}]\n", "used twice"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

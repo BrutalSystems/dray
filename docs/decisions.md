@@ -165,7 +165,9 @@ changes these on purpose:
   build source at its pinned commit beside it, not from the working tree and
   whatever happens to sit next to it. Uncommitted changes deploy only with
   `--allow-dirty`, and only to an environment whose registry entry sets
-  `allow_dirty`.
+  `allow_dirty`. A context of `..` is that build folder, holding the repo's
+  checkout (named after its repository) and its sources, if any; it needs no
+  sources of its own.
 - Manifests are applied server-side as field manager `dray`, and `kubectl
   diff` decides what changed. A workload that did not change is not applied
   or restarted; one whose config map, service or secret changed but whose

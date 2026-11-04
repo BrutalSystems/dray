@@ -110,12 +110,14 @@ func siblingLib(img Image) []config.BuildSource {
 	return nil
 }
 
-func TestOutsideContextWithoutSourcesNeedsAPerson(t *testing.T) {
+func TestParentContextWithoutSourcesIsFlagged(t *testing.T) {
 	r := Convert(load(t, "envcopies.json"), Options{Machine: machine(t), Repo: "example/booking"})
-	err := r.Config.Validate()
-	if err == nil || !strings.Contains(err.Error(), "list the other repos the build needs in sources") {
-		t.Fatalf("want the sources problem, got %v", err)
+	for _, w := range r.Warnings {
+		if strings.Contains(w.Message, "If the build needs other repos beside it, list them in sources") {
+			return
+		}
 	}
+	t.Fatalf("want a warning for a parent context with no sources, got %v", r.Warnings)
 }
 
 func TestConvertedConfigsRoundTrip(t *testing.T) {

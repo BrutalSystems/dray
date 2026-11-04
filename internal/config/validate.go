@@ -64,10 +64,9 @@ func (c *RepoConfig) Validate() error {
 		declare(img.Name, where)
 		checkRepoPath(&p, where+".dockerfile", img.Dockerfile)
 		switch {
-		case path.Clean(img.Context) == ".." && len(img.Sources) > 0:
-			// The shared folder that holds this repo and its sources.
 		case path.Clean(img.Context) == "..":
-			p.addf(where+".context", `".." reaches outside the repo; list the other repos the build needs in sources`)
+			// The build folder that holds this repo's checkout, named after
+			// its repository, and its sources, if any; nothing else.
 		default:
 			checkRepoPath(&p, where+".context", img.Context)
 		}

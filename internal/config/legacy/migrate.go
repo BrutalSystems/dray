@@ -136,7 +136,7 @@ func Convert(old *Config, opts Options) *Result {
 					warn(where, "builds with %s beside this repo; pinned to commit %s from your local checkout. Check it matches what is deployed (D18)", s.Repo, s.Commit)
 				}
 			} else {
-				warn(where, "builds from %s, outside this repo, to use other repos beside it; list them in sources, each pinned to a commit (D18)", img.Context)
+				warn(where, "builds from %s, the folder above the repo; Dray builds there with only this repo's checkout. If the build needs other repos beside it, list them in sources, each pinned to a commit (D18)", img.Context)
 			}
 		}
 		if a := img.BuildArgs; a != nil {
