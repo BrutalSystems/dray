@@ -365,3 +365,33 @@ func oneOf(p *problems, where, v string, optional bool, allowed ...string) {
 	}
 	p.addf(where, "%q must be one of %s", v, strings.Join(allowed, ", "))
 }
+
+var (
+	accountID = regexp.MustCompile(`^[0-9]{12}$`)
+	regionRE  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`)
+	platform  = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$`)
+)
+
+// Validate checks a target.
+func (t *Target) Validate() error {
+	var p problems
+	if !dnsLabel.MatchString(t.Name) {
+		p.addf("name", "%q must be lowercase letters, digits and dashes", t.Name)
+	}
+	oneOf(&p, "cloud", t.Cloud, false, "aws")
+	if t.Cloud == "aws" {
+		if !accountID.MatchString(t.Account) {
+			p.addf("account", "%q is not a 12-digit AWS account ID", t.Account)
+		}
+		if !regionRE.MatchString(t.Region) {
+			p.addf("region", "%q is not a region such as us-east-2", t.Region)
+		}
+	}
+	if t.Cluster == "" {
+		p.addf("cluster", "name the Kubernetes context")
+	}
+	if t.Platform != "" && !platform.MatchString(t.Platform) {
+		p.addf("platform", "%q is not a platform such as linux/arm64", t.Platform)
+	}
+	return p.err()
+}

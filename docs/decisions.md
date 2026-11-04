@@ -156,6 +156,32 @@ and pins each to the local checkout's commit, for a person to confirm.
 Publishing a shared library as a versioned package remains the long-term
 direction, adopted per app when convenient.
 
+## D19 · Where the CLI deploy differs from the JS tool's
+
+The CLI deploy (M0.5) keeps every safety rule of the JS tool's `ship`, and
+changes these on purpose:
+
+- Images are built from the commit exported into a fresh folder, with each
+  build source at its pinned commit beside it, not from the working tree and
+  whatever happens to sit next to it. Uncommitted changes deploy only with
+  `--allow-dirty`, and only to an environment whose registry entry sets
+  `allow_dirty`.
+- Manifests are applied server-side as field manager `dray`, and `kubectl
+  diff` decides what changed. A workload that did not change is not applied
+  or restarted; one whose config map, service or secret changed but whose
+  pod template did not is restarted; one already rolling out is only waited
+  on. The JS tool restarted every Deployment on every ship. `--restart`
+  restarts anyway, for a secret changed by hand.
+- A build argument env file that is missing, or holds no matching values, is
+  an error. The JS tool skipped it, which builds a front end without its
+  settings.
+- Build argument values and registry passwords reach docker through its
+  environment and stdin, never its command line.
+- A per-environment image is tagged `<commit>-<env>`; a dirty build gets a
+  tag of its own, since registries keep tags immutable.
+- Dry runs ask the cluster what would change and report every problem a real
+  deploy would stop on, instead of printing the commands they would run.
+
 ## D12 · Scope kept for later phases
 
 Preview environments per pull request, release groups for services that ship

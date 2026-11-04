@@ -22,6 +22,9 @@ import (
 // belong in a repo, such as which secret store to use.
 type UserConfig struct {
 	SecretStore stores.Config `json:"secret_store"`
+	// Registry is the folder holding registry entries (<app>.yaml) and
+	// targets (targets/<name>.yaml); default "registry" beside this file.
+	Registry string `json:"registry,omitempty"`
 }
 
 // UserConfigPath is $DRAY_CONFIG, else $XDG_CONFIG_HOME/dray/config.yaml,
@@ -49,28 +52,51 @@ const userConfigExample = `secret_store:
     clients:
       shop: acme
   # file:
-  #   dir: ~/.local/share/dray/secrets`
+  #   dir: ~/.local/share/dray/secrets
+registry: ~/.config/dray/registry       # <app>.yaml and targets/<name>.yaml`
 
-func openStore(path, env string) (secrets.Store, error) {
+// loadUserConfig reads Dray's config file and returns it with its path.
+func loadUserConfig(path string) (*UserConfig, string, error) {
 	if path == "" {
 		path = UserConfigPath()
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // the user's own config file
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("no secret store configured: create %s, for example:\n\n%s", path, userConfigExample)
+		return nil, path, fmt.Errorf("no Dray config: create %s, for example:\n\n%s", path, userConfigExample)
 	}
 	if err != nil {
-		return nil, err
+		return nil, path, err
 	}
 	var c UserConfig
 	if err := yaml.UnmarshalStrict(data, &c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, path, fmt.Errorf("%s: %w", path, err)
+	}
+	return &c, path, nil
+}
+
+func openStore(path, env string) (secrets.Store, error) {
+	c, path, err := loadUserConfig(path)
+	if err != nil {
+		return nil, err
 	}
 	s, err := stores.Open(c.SecretStore, env)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return s, nil
+}
+
+// expandHome turns a leading ~/ into the home folder.
+func expandHome(p string) (string, error) {
+	rest, ok := strings.CutPrefix(p, "~/")
+	if !ok {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, rest), nil
 }
 
 // NewSecretsCmd is `dray secrets`: the secret store, seen by path and key

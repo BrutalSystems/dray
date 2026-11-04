@@ -44,6 +44,10 @@
           "type": "boolean",
           "description": "CIRequired refuses to deploy a commit unless CI passed on it."
         },
+        "allow_dirty": {
+          "type": "boolean",
+          "description": "AllowDirty lets an operator's CLI deploy uncommitted changes here, for\na dev environment. Never set it for production."
+        },
         "on_merge": {
           "type": "string",
           "enum": [

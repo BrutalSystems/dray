@@ -54,6 +54,9 @@ type Environment struct {
 	Approval string `json:"approval" jsonschema:"enum=none,enum=passkey,enum=chat"`
 	// CIRequired refuses to deploy a commit unless CI passed on it.
 	CIRequired bool `json:"ci_required,omitempty"`
+	// AllowDirty lets an operator's CLI deploy uncommitted changes here, for
+	// a dev environment. Never set it for production.
+	AllowDirty bool `json:"allow_dirty,omitempty"`
 	// OnMerge deploys when CI finishes green on the main branch; for an
 	// environment that needs approval it only opens the request.
 	OnMerge string `json:"on_merge,omitempty" jsonschema:"enum=off,enum=deploy"`

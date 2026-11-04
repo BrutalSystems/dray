@@ -62,3 +62,15 @@ func strictUnmarshal(data []byte, v any) error {
 	}
 	return nil
 }
+
+// ParseTarget reads a target strictly and checks it.
+func ParseTarget(data []byte) (*Target, error) {
+	var t Target
+	if err := strictUnmarshal(data, &t); err != nil {
+		return nil, err
+	}
+	if err := t.Validate(); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
