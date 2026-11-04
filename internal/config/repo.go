@@ -72,7 +72,8 @@ type BuildArgs struct {
 }
 
 // Use pins a shared component this app deploys. Exactly one of Version or
-// Commit is set.
+// Commit is set. Dray deploys the image already in the registry under that
+// tag; it does not build components for apps (D14).
 type Use struct {
 	// Component is the component's registry name, such as jobs-service.
 	Component string `json:"component" jsonschema:"pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"`
@@ -81,6 +82,9 @@ type Use struct {
 	// Commit pins a commit instead of a version, for components that have not
 	// started tagging releases yet.
 	Commit string `json:"commit,omitempty" jsonschema:"pattern=^[0-9a-f]{7,40}$"`
+	// Repository is the container repository holding the component's images,
+	// tagged by version or commit; defaults to Component.
+	Repository string `json:"repository,omitempty"`
 	// As is the name workloads use for this image; defaults to Component.
 	As string `json:"as,omitempty" jsonschema:"pattern=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"`
 	// TemplateVar is the placeholder manifests use; defaults to AS_IMAGE.
@@ -145,4 +149,20 @@ type Pilets struct {
 	Command []string `json:"command" jsonschema:"minItems=1"`
 	// Env is passed to the command as environment variables, such as the feed key.
 	Env SecretRef `json:"env,omitempty"`
+}
+
+// RepositoryName is the container repository holding the component's images.
+func (u Use) RepositoryName() string {
+	if u.Repository != "" {
+		return u.Repository
+	}
+	return u.Component
+}
+
+// Tag is the registry tag of the pinned image: the version or the commit.
+func (u Use) Tag() string {
+	if u.Version != "" {
+		return u.Version
+	}
+	return u.Commit
 }

@@ -179,6 +179,10 @@
           "pattern": "^[0-9a-f]{7",
           "description": "Commit pins a commit instead of a version, for components that have not\nstarted tagging releases yet."
         },
+        "repository": {
+          "type": "string",
+          "description": "Repository is the container repository holding the component's images,\ntagged by version or commit; defaults to Component."
+        },
         "as": {
           "type": "string",
           "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",

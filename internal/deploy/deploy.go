@@ -83,6 +83,9 @@ type image struct {
 	digest string
 	build  bool
 	args   map[string]string
+	// component images are pinned in uses and taken from the registry as
+	// they are; Dray never builds them for an app.
+	component bool
 }
 
 func (i *image) ref(host string) string {
@@ -280,7 +283,12 @@ func (s *state) planImages(ctx context.Context) error {
 			seen[name] = true
 			i := imageIndex(c.Images, name)
 			if i < 0 {
-				return fmt.Errorf("workload %s runs %s, a shared component: deploying components is not supported yet (D14)", w.Name, name)
+				img, err := s.component(ctx, name)
+				if err != nil {
+					return err
+				}
+				s.images = append(s.images, img)
+				continue
 			}
 			img := &image{cfg: c.Images[i], repo: c.Images[i].Repository, tag: s.commit}
 			if img.repo == "" {
@@ -311,13 +319,38 @@ func (s *state) planImages(ctx context.Context) error {
 		}
 	}
 	for _, img := range s.images {
-		if img.build {
+		switch {
+		case img.component:
+			s.printf("image %s: component, deploying %s", img.cfg.Name, img.ref(s.o.Registry.Host()))
+		case img.build:
 			s.printf("image %s: build %s", img.cfg.Name, img.ref(s.o.Registry.Host()))
-		} else {
+		default:
 			s.printf("image %s: already built, reusing %s", img.cfg.Name, img.ref(s.o.Registry.Host()))
 		}
 	}
 	return nil
+}
+
+// component resolves an image pinned in uses to the registry's image for its
+// version or commit.
+func (s *state) component(ctx context.Context, name string) (*image, error) {
+	for _, u := range s.o.Repo.Uses {
+		if u.LocalName() != name {
+			continue
+		}
+		img := &image{cfg: config.Image{Name: name, TemplateVar: u.TemplateVar}, repo: u.RepositoryName(), tag: u.Tag(), component: true}
+		d, err := s.o.Registry.Digest(ctx, img.repo, img.tag)
+		if err != nil {
+			return nil, err
+		}
+		if d == "" {
+			// A dry run goes on with the tag, to show the rest.
+			return img, s.problem(fmt.Errorf("component %s: %s:%s is not in the registry, and Dray does not build components for an app (D14)", u.Component, img.repo, img.tag))
+		}
+		img.digest = d
+		return img, nil
+	}
+	return nil, fmt.Errorf("unknown image %q", name)
 }
 
 func imageIndex(imgs []config.Image, name string) int {

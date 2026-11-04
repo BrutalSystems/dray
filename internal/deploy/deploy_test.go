@@ -143,6 +143,7 @@ images:
     build_per_environment: true
 uses:
   - component: jobs
+    repository: shop-jobs
     commit: abc1234
 workloads:
   - name: api
@@ -443,7 +444,7 @@ func TestSelection(t *testing.T) {
 	for names, want := range map[string]string{
 		"old":     "disabled",
 		"missing": `no workload "missing"`,
-		"jobs":    "shared component",
+		"jobs":    "shop-jobs:abc1234 is not in the registry, and Dray does not build components",
 	} {
 		h := newHarness(t)
 		h.o.Workloads = []string{names}
@@ -510,5 +511,20 @@ func TestBuildSpecStaysInWorkspace(t *testing.T) {
 	s, err := buildSpec(ws, img, "h", "")
 	if err != nil || s.Context != "/w" || s.Dockerfile != "/w/shop/Dockerfile" {
 		t.Errorf("%+v %v", s, err)
+	}
+}
+
+func TestComponentDeploysTheRegistrysImage(t *testing.T) {
+	h := newHarness(t)
+	h.reg.tags["shop-jobs:abc1234"] = digestA
+	h.o.Workloads = []string{"jobs"}
+	if err := h.run(t); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.b.built) != 0 || h.src.opened != 0 {
+		t.Error("a component was built")
+	}
+	if !strings.Contains(h.appliedText(), "image: reg.example.com/shop-jobs:abc1234@"+digestA) {
+		t.Errorf("applied:\n%s", h.appliedText())
 	}
 }

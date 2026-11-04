@@ -7,6 +7,7 @@ images:
 uses:
   - component: queue-service
     commit: abc1234
+    repository: queue
     as: queue
 workloads:
   # Talks to queue over HTTP.

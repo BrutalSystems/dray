@@ -93,6 +93,9 @@ func Convert(old *Config, opts Options) *Result {
 				u.As = img.Name
 			}
 			u.TemplateVar = img.TemplateVar
+			if img.ECR != "" && img.ECR != comp {
+				u.Repository = img.ECR
+			}
 			if opts.RunningCommit != nil {
 				u.Commit = opts.RunningCommit(img.Name)
 			}

@@ -38,6 +38,7 @@ var (
 	commitSHA  = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 	repoSlug   = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	imageRef   = regexp.MustCompile(`^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$`)
+	repoName   = regexp.MustCompile(`^[a-z0-9]+([._/-][a-z0-9]+)*$`)
 	sourcePath = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 )
 
@@ -116,6 +117,9 @@ func (c *RepoConfig) Validate() error {
 			p.addf(where+".version", "%q is not a version such as 1.8.0", u.Version)
 		case u.Commit != "" && !commitSHA.MatchString(u.Commit):
 			p.addf(where+".commit", "%q is not a commit hash", u.Commit)
+		}
+		if u.Repository != "" && !repoName.MatchString(u.Repository) {
+			p.addf(where+".repository", "%q is not a container repository name", u.Repository)
 		}
 		if u.As != "" && !dnsLabel.MatchString(u.As) {
 			p.addf(where+".as", "%q must be lowercase letters, digits and dashes", u.As)
