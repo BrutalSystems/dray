@@ -72,6 +72,13 @@ func server(t *testing.T) (addr, token string) {
 	return "", ""
 }
 
+func must(s string, err error) string {
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
 func randomPrefix() string {
 	var b [6]byte
 	_, _ = rand.Read(b[:])
@@ -82,7 +89,7 @@ func TestConformance(t *testing.T) {
 	addr, token := server(t)
 	storetest.Run(t, func(t *testing.T) secrets.Store {
 		s, err := New(Config{
-			Address: addr, Prefix: randomPrefix(),
+			Address: addr, Layout: Layout{Template: randomPrefix() + "/{app}/{name}"},
 			Token: func(context.Context) (string, error) { return token, nil },
 		})
 		if err != nil {
@@ -94,12 +101,12 @@ func TestConformance(t *testing.T) {
 
 func TestNonStringValuesReadAsJSON(t *testing.T) {
 	addr, token := server(t)
-	s, err := New(Config{Address: addr, Prefix: randomPrefix(), Token: func(context.Context) (string, error) { return token, nil }})
+	s, err := New(Config{Address: addr, Layout: Layout{Template: randomPrefix() + "/{app}/{name}"}, Token: func(context.Context) (string, error) { return token, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if _, err := s.do(ctx, http.MethodPost, "/data/"+s.full("shop/app"), map[string]any{"data": map[string]any{"PORT": 8080, "ON": true, "S": "x"}}, nil); err != nil {
+	if _, err := s.do(ctx, http.MethodPost, "/data/"+must(s.cfg.Layout.location("shop/app")), map[string]any{"data": map[string]any{"PORT": 8080, "ON": true, "S": "x"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	v, err := s.Get(ctx, "shop/app")
@@ -133,18 +140,73 @@ func TestConfigChecks(t *testing.T) {
 		{Token: tok},
 		{Address: "http://x"},
 		{Address: "http://x", Mount: "../sys", Token: tok},
-		{Address: "http://x", Prefix: "a/../b", Token: tok},
+		{Address: "http://x", Layout: Layout{Template: "a/../{app}/{name}"}, Token: tok},
+		{Address: "http://x", Layout: Layout{Template: "{name}/{app}"}, Token: tok},
+		{Address: "http://x", Layout: Layout{Template: "{app}/{app}/{name}"}, Token: tok},
+		{Address: "http://x", Layout: Layout{Template: "dray/{name}"}, Token: tok},
+		{Address: "http://x", Layout: Layout{Template: "{app}/{env}/{name}", Env: "Prod!"}, Token: tok},
 	}
 	for _, c := range bad {
 		if _, err := New(c); err == nil {
 			t.Errorf("New(%+v) succeeded", c)
 		}
 	}
-	s, err := New(Config{Address: "https://bao.example.com/", Prefix: "/dray/", Token: tok})
+	s, err := New(Config{Address: "https://bao.example.com/", Layout: Layout{Template: "dray/{app}/{name}"}, Token: tok})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.String() != "openbao https://bao.example.com/ secret/dray" || s.base != "https://bao.example.com/v1/secret" {
+	if s.String() != "openbao https://bao.example.com/ secret/dray/{app}/{name}" || s.base != "https://bao.example.com/v1/secret" {
 		t.Errorf("String %q base %q", s.String(), s.base)
 	}
+}
+
+func TestLayout(t *testing.T) {
+	l := Layout{Template: "{client}/{app}/{env}/{name}", Clients: map[string]string{"shop": "acme"}, Env: "prod"}
+	if err := l.check(); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{"shop/app": "acme/shop/prod/app", "shop/feeds/dev": "acme/shop/prod/feeds/dev"}
+	for in, want := range cases {
+		if got := must(l.location(in)); got != want {
+			t.Errorf("location(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if _, err := l.location("other/app"); err == nil || !strings.Contains(err.Error(), "no client set for app other") {
+		t.Errorf("unknown client: %v", err)
+	}
+	l.Env = ""
+	if _, err := l.location("shop/app"); err == nil || !strings.Contains(err.Error(), "--env") {
+		t.Errorf("no env: %v", err)
+	}
+	if _, ok := l.appsBase(); ok {
+		t.Error("a {client} before {app} has no fixed base")
+	}
+	if b, ok := (Layout{Template: "dray/{app}/{name}"}).appsBase(); !ok || b != "dray" {
+		t.Errorf("appsBase = %q %v", b, ok)
+	}
+	if b, ok := (Layout{}).appsBase(); !ok || b != "" {
+		t.Errorf("default appsBase = %q %v", b, ok)
+	}
+}
+
+// TestStandardLayout runs the conformance suite with secrets per client and
+// environment, as kv/<client>/<app>/<env>/<name>.
+func TestStandardLayout(t *testing.T) {
+	addr, token := server(t)
+	storetest.Run(t, func(t *testing.T) secrets.Store {
+		root := randomPrefix()
+		s, err := New(Config{
+			Address: addr,
+			Layout: Layout{
+				Template: root + "/{client}/{app}/{env}/{name}",
+				Clients:  map[string]string{"shop": "acme", "shopping": "acme", "other": "beta"},
+				Env:      "prod",
+			},
+			Token: func(context.Context) (string, error) { return token, nil },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	})
 }

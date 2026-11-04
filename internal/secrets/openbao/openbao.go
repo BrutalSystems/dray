@@ -1,8 +1,8 @@
 // Package openbao is a secret store backed by an OpenBao (or Vault) KV
 // version 2 engine, reached over its HTTP API with no client library.
 //
-// A logical path such as shop/app lives at <mount>/data/<prefix>/shop/app.
-// Mount and prefix are deployment settings, so a repo never names them.
+// Where a logical path such as shop/app lives inside the mount is set by a
+// Layout, a deployment setting, so a repo never names a store location.
 package openbao
 
 import (
@@ -29,9 +29,9 @@ type Config struct {
 	Address string
 	// Mount is the KV v2 engine's mount; defaults to "secret".
 	Mount string
-	// Prefix is the folder inside the mount that holds Dray's secrets, such
-	// as "dray". Empty uses the mount's top level.
-	Prefix string
+	// Layout places logical paths inside the mount; the default puts
+	// secret:shop/app at shop/app.
+	Layout Layout
 	// Namespace is sent as X-Vault-Namespace when set.
 	Namespace string
 	// Token returns the token to send. Use EnvToken for the CLI.
@@ -56,9 +56,11 @@ func New(cfg Config) (*Store, error) {
 	if cfg.Mount == "" {
 		cfg.Mount = "secret"
 	}
-	cfg.Prefix = strings.Trim(cfg.Prefix, "/")
-	if !folderRE.MatchString(cfg.Mount) || (cfg.Prefix != "" && !folderRE.MatchString(cfg.Prefix)) {
-		return nil, fmt.Errorf("openbao: bad mount %q or prefix %q", cfg.Mount, cfg.Prefix)
+	if !folderRE.MatchString(cfg.Mount) {
+		return nil, fmt.Errorf("openbao: bad mount %q", cfg.Mount)
+	}
+	if err := cfg.Layout.check(); err != nil {
+		return nil, fmt.Errorf("openbao: %w", err)
 	}
 	if cfg.Token == nil {
 		return nil, errors.New("openbao: no token source set")
@@ -70,21 +72,21 @@ func New(cfg Config) (*Store, error) {
 }
 
 func (s *Store) String() string {
-	where := s.cfg.Mount
-	if s.cfg.Prefix != "" {
-		where += "/" + s.cfg.Prefix
+	where := s.cfg.Mount + "/" + s.cfg.Layout.template()
+	if s.cfg.Layout.Env != "" {
+		where += " (env " + s.cfg.Layout.Env + ")"
 	}
 	return "openbao " + s.cfg.Address + " " + where
 }
 
-func (s *Store) full(p string) string {
-	if s.cfg.Prefix == "" {
-		return p
+// Where returns the location of a logical path inside the store, such as
+// kv/acme/shop/prod/app, for messages.
+func (s *Store) Where(p string) (string, error) {
+	loc, err := s.cfg.Layout.location(p)
+	if err != nil {
+		return "", err
 	}
-	if p == "" {
-		return s.cfg.Prefix
-	}
-	return s.cfg.Prefix + "/" + p
+	return s.cfg.Mount + "/" + loc, nil
 }
 
 // Get implements secrets.Store. Values that are not strings in the store are
@@ -98,7 +100,11 @@ func (s *Store) Get(ctx context.Context, p string) (secrets.Values, error) {
 			Data map[string]json.RawMessage `json:"data"`
 		} `json:"data"`
 	}
-	found, err := s.do(ctx, http.MethodGet, "/data/"+s.full(p), nil, &body)
+	loc, err := s.cfg.Layout.location(p)
+	if err != nil {
+		return nil, err
+	}
+	found, err := s.do(ctx, http.MethodGet, "/data/"+loc, nil, &body)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", p, err)
 	}
@@ -125,7 +131,11 @@ func (s *Store) Put(ctx context.Context, p string, v secrets.Values) error {
 	if err := secrets.CheckValues(v); err != nil {
 		return err
 	}
-	if _, err := s.do(ctx, http.MethodPost, "/data/"+s.full(p), map[string]any{"data": v}, nil); err != nil {
+	loc, err := s.cfg.Layout.location(p)
+	if err != nil {
+		return err
+	}
+	if _, err := s.do(ctx, http.MethodPost, "/data/"+loc, map[string]any{"data": v}, nil); err != nil {
 		return fmt.Errorf("%s: %w", p, err)
 	}
 	return nil
@@ -137,60 +147,91 @@ func (s *Store) Delete(ctx context.Context, p string) error {
 	if err := secrets.CheckPath(p); err != nil {
 		return err
 	}
-	if _, err := s.do(ctx, http.MethodDelete, "/metadata/"+s.full(p), nil, nil); err != nil {
+	loc, err := s.cfg.Layout.location(p)
+	if err != nil {
+		return err
+	}
+	if _, err := s.do(ctx, http.MethodDelete, "/metadata/"+loc, nil, nil); err != nil {
 		return fmt.Errorf("%s: %w", p, err)
 	}
 	return nil
 }
 
-// List implements secrets.Store.
+// List implements secrets.Store. It lists each app's folder; with an empty
+// prefix the apps are the folders under the layout's base, or the apps named
+// in Clients when the layout has a {client} before {app}.
 func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	if err := secrets.CheckPrefix(prefix); err != nil {
 		return nil, err
 	}
-	out := []string{}
+	var apps []string
 	if prefix != "" {
-		// The prefix may itself be a secret: look for it in its parent folder.
-		if i := strings.LastIndex(prefix, "/"); i > 0 {
-			keys, err := s.list(ctx, prefix[:i])
-			if err != nil {
-				return nil, err
-			}
-			for _, k := range keys {
-				if k == prefix[i+1:] {
-					out = append(out, prefix)
-				}
+		app, _, _ := strings.Cut(prefix, "/")
+		apps = []string{app}
+	} else if base, ok := s.cfg.Layout.appsBase(); ok {
+		keys, err := s.list(ctx, base)
+		if err != nil {
+			return nil, err
+		}
+		for _, k := range keys {
+			if a, isFolder := strings.CutSuffix(k, "/"); isFolder {
+				apps = append(apps, a)
 			}
 		}
+	} else {
+		apps = s.cfg.Layout.knownApps()
 	}
-	if err := s.walk(ctx, prefix, &out); err != nil {
-		return nil, err
+	out := []string{}
+	for _, app := range apps {
+		folder, err := s.cfg.Layout.folder(app)
+		if errors.Is(err, errNoClient) {
+			continue // an app with no client has no secrets here
+		}
+		if err != nil {
+			return nil, err
+		}
+		var rel []string
+		if err := s.walk(ctx, folder, "", &rel); err != nil {
+			return nil, err
+		}
+		for _, r := range rel {
+			p := app + "/" + r
+			if secrets.CheckPath(p) == nil && secrets.UnderPrefix(p, prefix) {
+				out = append(out, p)
+			}
+		}
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-func (s *Store) walk(ctx context.Context, folder string, out *[]string) error {
-	keys, err := s.list(ctx, folder)
+// walk collects the secrets under folder, as paths relative to it.
+func (s *Store) walk(ctx context.Context, folder, rel string, out *[]string) error {
+	keys, err := s.list(ctx, join(folder, rel))
 	if err != nil {
 		return err
 	}
 	for _, k := range keys {
-		p := strings.TrimSuffix(k, "/")
-		if folder != "" {
-			p = folder + "/" + p
-		}
-		if strings.HasSuffix(k, "/") {
-			if err := s.walk(ctx, p, out); err != nil {
+		name, isFolder := strings.CutSuffix(k, "/")
+		if isFolder {
+			if err := s.walk(ctx, folder, join(rel, name), out); err != nil {
 				return err
 			}
 			continue
 		}
-		if secrets.CheckPath(p) == nil {
-			*out = append(*out, p)
-		}
+		*out = append(*out, join(rel, name))
 	}
 	return nil
+}
+
+func join(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	return a + "/" + b
 }
 
 func (s *Store) list(ctx context.Context, folder string) ([]string, error) {
@@ -199,7 +240,7 @@ func (s *Store) list(ctx context.Context, folder string) ([]string, error) {
 			Keys []string `json:"keys"`
 		} `json:"data"`
 	}
-	found, err := s.do(ctx, "LIST", "/metadata/"+s.full(folder)+"/", nil, &body)
+	found, err := s.do(ctx, "LIST", "/metadata/"+folder+"/", nil, &body)
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", folder, err)
 	}

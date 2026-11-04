@@ -25,10 +25,14 @@ type Config struct {
 // BAO_TOKEN, VAULT_TOKEN or ~/.vault-token, never from this file.
 type OpenBaoConfig struct {
 	// Address defaults to BAO_ADDR, then VAULT_ADDR.
-	Address   string `json:"address,omitempty"`
-	Mount     string `json:"mount,omitempty"`
-	Prefix    string `json:"prefix,omitempty"`
-	Namespace string `json:"namespace,omitempty"`
+	Address string `json:"address,omitempty"`
+	Mount   string `json:"mount,omitempty"`
+	// Layout places secret:<app>/<name> in the mount, such as
+	// {client}/{app}/{env}/{name}; defaults to {app}/{name}.
+	Layout string `json:"layout,omitempty"`
+	// Clients maps each app to its client, for {client}.
+	Clients   map[string]string `json:"clients,omitempty"`
+	Namespace string            `json:"namespace,omitempty"`
 }
 
 // FileConfig configures the file adapter.
@@ -37,8 +41,9 @@ type FileConfig struct {
 	Dir string `json:"dir"`
 }
 
-// Open returns the configured store.
-func Open(c Config) (secrets.Store, error) {
+// Open returns the configured store. env is the environment being worked
+// on, for layouts that keep secrets per environment; it may be empty.
+func Open(c Config, env string) (secrets.Store, error) {
 	switch c.Type {
 	case "openbao":
 		oc := OpenBaoConfig{}
@@ -49,8 +54,9 @@ func Open(c Config) (secrets.Store, error) {
 			oc.Address = openbao.EnvAddress()
 		}
 		return openbao.New(openbao.Config{
-			Address: oc.Address, Mount: oc.Mount, Prefix: oc.Prefix, Namespace: oc.Namespace,
-			Token: openbao.EnvToken,
+			Address: oc.Address, Mount: oc.Mount, Namespace: oc.Namespace,
+			Layout: openbao.Layout{Template: oc.Layout, Clients: oc.Clients, Env: env},
+			Token:  openbao.EnvToken,
 		})
 	case "file":
 		if c.File == nil || c.File.Dir == "" {

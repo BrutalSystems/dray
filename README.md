@@ -51,9 +51,15 @@ secret_store:
   type: openbao            # or file
   openbao:
     address: https://bao.example.com   # default: BAO_ADDR, then VAULT_ADDR
-    mount: secret                      # a KV version 2 engine
-    prefix: dray                       # secret:shop/app is secret/data/dray/shop/app
+    mount: kv                          # a KV version 2 engine
+    layout: "{client}/{app}/{env}/{name}"
+    clients:
+      shop: acme
 ```
+
+The layout follows the vault's own naming: with the one above,
+`secret:shop/app` deployed to prod is `kv/acme/shop/prod/app`. The default
+layout is `{app}/{name}`; `--env` names the environment.
 
 The token comes from `BAO_TOKEN`, `VAULT_TOKEN` or `~/.vault-token`, never the
 file. To use another store, write an adapter that implements

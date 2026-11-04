@@ -44,12 +44,14 @@ const userConfigExample = `secret_store:
   type: openbao          # or file
   openbao:
     address: https://bao.example.com   # default: BAO_ADDR, then VAULT_ADDR
-    mount: secret
-    prefix: dray
+    mount: kv
+    layout: "{client}/{app}/{env}/{name}"   # default: {app}/{name}
+    clients:
+      shop: acme
   # file:
   #   dir: ~/.local/share/dray/secrets`
 
-func openStore(path string) (secrets.Store, error) {
+func openStore(path, env string) (secrets.Store, error) {
 	if path == "" {
 		path = UserConfigPath()
 	}
@@ -64,7 +66,7 @@ func openStore(path string) (secrets.Store, error) {
 	if err := yaml.UnmarshalStrict(data, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	s, err := stores.Open(c.SecretStore)
+	s, err := stores.Open(c.SecretStore, env)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -74,7 +76,7 @@ func openStore(path string) (secrets.Store, error) {
 // NewSecretsCmd is `dray secrets`: the secret store, seen by path and key
 // name. No command prints a value.
 func NewSecretsCmd() *cobra.Command {
-	var cfgPath string
+	var cfgPath, env string
 	cmd := &cobra.Command{
 		Use:   "secrets",
 		Short: "Look at and import secrets in the configured store",
@@ -83,13 +85,14 @@ func NewSecretsCmd() *cobra.Command {
 			"key name; no command prints a value.",
 	}
 	cmd.PersistentFlags().StringVar(&cfgPath, "config", "", "Dray's config file (default $DRAY_CONFIG or ~/.config/dray/config.yaml)")
+	cmd.PersistentFlags().StringVar(&env, "env", "", "environment, for stores that keep secrets per environment (dev, staging, prod)")
 
 	list := &cobra.Command{
 		Use:   "list [prefix]",
 		Short: "List secret paths, such as shop/app",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore(cfgPath)
+			s, err := openStore(cfgPath, env)
 			if err != nil {
 				return err
 			}
@@ -112,7 +115,7 @@ func NewSecretsCmd() *cobra.Command {
 		Short: "List a secret's key names",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore(cfgPath)
+			s, err := openStore(cfgPath, env)
 			if err != nil {
 				return err
 			}
@@ -126,7 +129,7 @@ func NewSecretsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(list, keys, newSecretsImportCmd(&cfgPath))
+	cmd.AddCommand(list, keys, newSecretsImportCmd(&cfgPath, &env))
 	return cmd
 }
 
@@ -137,7 +140,7 @@ var legacyFormats = map[string]sops.Format{
 	"sops-dotenv":      sops.Dotenv,
 }
 
-func newSecretsImportCmd(cfgPath *string) *cobra.Command {
+func newSecretsImportCmd(cfgPath, env *string) *cobra.Command {
 	var write, overwrite bool
 	cmd := &cobra.Command{
 		Use:   "import [repo]",
@@ -174,7 +177,7 @@ func newSecretsImportCmd(cfgPath *string) *cobra.Command {
 				_, err := fmt.Fprintf(out, "%s uses no secrets\n", old.Name)
 				return err
 			}
-			target, err := openStore(*cfgPath)
+			target, err := openStore(*cfgPath, *env)
 			if err != nil {
 				return err
 			}
@@ -225,6 +228,13 @@ func importSecrets(cmd *cobra.Command, src *sops.Store, target secrets.Store, wr
 			continue
 		}
 		_, _ = fmt.Fprintf(out, "    keys: %s\n", strings.Join(v.Keys(), ", "))
+		if w, ok := target.(interface{ Where(string) (string, error) }); ok {
+			loc, err := w.Where(p)
+			if err != nil {
+				return res, err
+			}
+			_, _ = fmt.Fprintf(out, "    to:   %s\n", loc)
+		}
 		have, err := target.Get(ctx, p)
 		var status string
 		switch {
