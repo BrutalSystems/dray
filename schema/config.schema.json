@@ -28,6 +28,33 @@
       "type": "object",
       "description": "BuildArgs are build-time values."
     },
+    "BuildSource": {
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "description": "Repo is the GitHub repository, owner/name."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "description": "Path is the folder it is cloned into, next to this repo's folder."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7",
+          "description": "Commit pins the exact commit."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "repo",
+        "path",
+        "commit"
+      ],
+      "description": "BuildSource is another repo checked out next to this one for a build, pinned to a commit."
+    },
     "Duration": {
       "type": "string",
       "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
@@ -64,6 +91,13 @@
         "build_per_environment": {
           "type": "boolean",
           "description": "BuildPerEnvironment rebuilds the image for each environment from the same\ncommit instead of promoting one image. Set it for front ends that bake\nenvironment settings in at build time."
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/BuildSource"
+          },
+          "type": "array",
+          "description": "Sources are other repos the build needs beside this one, such as a shared\nlibrary the projects reference by relative path. Dray clones this repo\ninto a folder named after its repository and each source into its Path\nnext to it, so a context of \"..\" is that shared folder."
         }
       },
       "additionalProperties": false,

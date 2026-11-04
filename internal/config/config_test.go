@@ -131,6 +131,28 @@ secrets:
 	}
 }
 
+func TestBuildSources(t *testing.T) {
+	ok := "name: shop\nimages:\n  - name: api\n    context: ..\n    sources:\n      - {repo: example/lib, path: lib, commit: abc1234}\n"
+	if _, err := ParseRepoConfig([]byte(ok)); err != nil {
+		t.Fatalf("a parent context with sources should be valid: %v", err)
+	}
+	cases := map[string]struct{ doc, want string }{
+		"parent context, no sources": {"name: shop\nimages:\n  - {name: api, context: ..}\n", "list the other repos"},
+		"grandparent context":        {"name: shop\nimages:\n  - name: api\n    context: ../..\n    sources: [{repo: example/lib, path: lib, commit: abc1234}]\n", "must stay inside the repo"},
+		"unpinned source":            {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/lib, path: lib, commit: main}]\n", "pin a commit hash"},
+		"nested source path":         {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/lib, path: a/b, commit: abc1234}]\n", "single folder name"},
+		"same folder twice":          {"name: shop\nimages:\n  - name: api\n    context: ..\n    sources: [{repo: example/a, path: lib, commit: abc1234}, {repo: example/b, path: lib, commit: abc1234}]\n", "used twice"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseRepoConfig([]byte(tc.doc))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestSecretRef(t *testing.T) {
 	good := []string{"secret:shop/app", "secret:shop/feeds/prod", "secret:shop/app#API_KEY"}
 	bad := []string{"shop/app", "secret:shop", "secret:/app", "secret:Shop/app", "secret:shop/app#", "vault:kv/x"}

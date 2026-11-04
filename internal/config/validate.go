@@ -38,6 +38,7 @@ var (
 	commitSHA  = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 	repoSlug   = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	imageRef   = regexp.MustCompile(`^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$`)
+	sourcePath = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 )
 
 // Validate checks a repo config's values and the references between them.
@@ -62,7 +63,31 @@ func (c *RepoConfig) Validate() error {
 		}
 		declare(img.Name, where)
 		checkRepoPath(&p, where+".dockerfile", img.Dockerfile)
-		checkRepoPath(&p, where+".context", img.Context)
+		switch {
+		case path.Clean(img.Context) == ".." && len(img.Sources) > 0:
+			// The shared folder that holds this repo and its sources.
+		case path.Clean(img.Context) == "..":
+			p.addf(where+".context", `".." reaches outside the repo; list the other repos the build needs in sources`)
+		default:
+			checkRepoPath(&p, where+".context", img.Context)
+		}
+		seenPaths := map[string]bool{}
+		for j, s := range img.Sources {
+			sw := fmt.Sprintf("%s.sources[%d]", where, j)
+			if !repoSlug.MatchString(s.Repo) {
+				p.addf(sw+".repo", "%q must be owner/name", s.Repo)
+			}
+			if !sourcePath.MatchString(s.Path) || s.Path == "." || s.Path == ".." {
+				p.addf(sw+".path", "%q must be a single folder name", s.Path)
+			}
+			if seenPaths[s.Path] {
+				p.addf(sw+".path", "folder %q is used twice", s.Path)
+			}
+			seenPaths[s.Path] = true
+			if !commitSHA.MatchString(s.Commit) {
+				p.addf(sw+".commit", "pin a commit hash, got %q", s.Commit)
+			}
+		}
 		if img.TemplateVar != "" && !templateV.MatchString(img.TemplateVar) {
 			p.addf(where+".template_var", "%q must be upper-case letters, digits and underscores", img.TemplateVar)
 		}

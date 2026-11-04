@@ -143,6 +143,19 @@ was built or mirrored by Dray and is pinned by digest. Dray does the copy
 itself, so no upstream registry credential is stored and the same flow works
 on any cloud's registry.
 
+## D18 · Builds that need another repo list it as a pinned source
+
+Some builds use a second repo beside their own, such as a shared library the
+projects reference by relative path, with a build context of the shared
+parent folder. An image lists those repos in `sources`, each pinned to a
+commit; Dray clones the app's repo into a folder named after its repository
+and each source into its `path` next to it, so a context of `..` works
+unchanged. Upgrading a source is a one-line change in a pull request.
+`dray config migrate` finds sibling repos from the Dockerfile's COPY lines
+and pins each to the local checkout's commit, for a person to confirm.
+Publishing a shared library as a versioned package remains the long-term
+direction, adopted per app when convenient.
+
 ## D12 · Scope kept for later phases
 
 Preview environments per pull request, release groups for services that ship

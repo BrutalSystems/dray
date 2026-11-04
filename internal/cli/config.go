@@ -113,6 +113,7 @@ func newConfigMigrateCmd() *cobra.Command {
 				pinned[name] = commit
 			}
 			opts.RunningCommit = func(image string) string { return pinned[image] }
+			opts.BuildSources = siblingSources(dir)
 
 			res := legacy.Convert(old, opts)
 			out, err := config.EncodeYAML(res.Config, &res.Comments)

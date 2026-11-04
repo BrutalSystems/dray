@@ -40,6 +40,22 @@ type Image struct {
 	// commit instead of promoting one image. Set it for front ends that bake
 	// environment settings in at build time.
 	BuildPerEnvironment bool `json:"build_per_environment,omitempty"`
+	// Sources are other repos the build needs beside this one, such as a shared
+	// library the projects reference by relative path. Dray clones this repo
+	// into a folder named after its repository and each source into its Path
+	// next to it, so a context of ".." is that shared folder.
+	Sources []BuildSource `json:"sources,omitempty"`
+}
+
+// BuildSource is another repo checked out next to this one for a build,
+// pinned to a commit. Upgrading it is a one-line change in a pull request.
+type BuildSource struct {
+	// Repo is the GitHub repository, owner/name.
+	Repo string `json:"repo" jsonschema:"pattern=^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"`
+	// Path is the folder it is cloned into, next to this repo's folder.
+	Path string `json:"path" jsonschema:"pattern=^[A-Za-z0-9_][A-Za-z0-9_.-]*$"`
+	// Commit pins the exact commit.
+	Commit string `json:"commit" jsonschema:"pattern=^[0-9a-f]{7,40}$"`
 }
 
 // BuildArgs are build-time values. Anything here can end up in the image, and

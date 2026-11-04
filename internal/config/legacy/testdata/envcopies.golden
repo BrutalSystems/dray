@@ -9,6 +9,10 @@ images:
       prefix: APP_
       from_secret: secret:booking/build-booking-api
     build_per_environment: true
+    sources:
+      - repo: example/shared-lib
+        path: shared-lib
+        commit: def5678
   - name: booking-api-prod
 workloads:
   - name: booking-api
@@ -48,7 +52,7 @@ profile: booking-deploy
 platform: linux/amd64
 
 # --- warnings
-- images[0] booking-api: builds from .., outside this repo (usually to copy in a sibling repo such as a shared library). Dray builds from a clean clone of one repo, so this needs a different source before the image can build
+- images[0] booking-api: builds with example/shared-lib beside this repo; pinned to commit def5678 from your local checkout. Check it matches what is deployed (D18)
 - images[0] booking-api: build values from build.sops.env now come from secret:booking/build-booking-api; import them with dray secrets import. They end up in the image, and in a front end they are public: check none is a real secret
 - images[0] booking-api: bakes environment settings in at build time, so it is rebuilt per environment instead of promoted (D13)
 - images[1] booking-api-prod: looks like a copy for another environment; map it to an environment instead (D11)
@@ -58,5 +62,4 @@ platform: linux/amd64
 - workloads[1] booking-api-prod: looks like a copy for another environment; map it to an environment instead (D11)
 - registry: the prod environment keeps today's behavior: namespace booking marked shared (D15), direct apply, no approval. Tighten it once the app is on Dray
 # --- validation
-invalid config:
-  - images[0].context: ".." must stay inside the repo
+ok

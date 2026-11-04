@@ -25,6 +25,10 @@ type Options struct {
 	// today (from the image tag in the cluster), so its pin changes nothing at
 	// cutover. Nil, or "" for an image, leaves the pin for a person to fill in.
 	RunningCommit func(image string) string
+	// BuildSources finds the other repos an image builds with when its
+	// context reaches outside the repo, each pinned to a commit. Nil, or no
+	// result, leaves them for a person to list.
+	BuildSources func(image Image) []config.BuildSource
 }
 
 // Result is a converted config and everything a person must look at.
@@ -118,10 +122,21 @@ func Convert(old *Config, opts Options) *Result {
 		if img.Context != "" && img.Context != "." {
 			n.Context = img.Context
 		}
-		for _, p := range []string{img.Context, img.Dockerfile} {
-			if strings.HasPrefix(p, "..") || strings.HasPrefix(p, "/") {
-				warn(where, "builds from %s, outside this repo (usually to copy in a sibling repo such as a shared library). Dray builds from a clean clone of one repo, so this needs a different source before the image can build", p)
-				break
+		if strings.HasPrefix(img.Dockerfile, "..") || strings.HasPrefix(img.Dockerfile, "/") {
+			warn(where, "its Dockerfile %s is outside this repo; move it into the repo", img.Dockerfile)
+		}
+		if strings.HasPrefix(img.Context, "..") || strings.HasPrefix(img.Context, "/") {
+			var found []config.BuildSource
+			if opts.BuildSources != nil {
+				found = opts.BuildSources(img)
+			}
+			if len(found) > 0 {
+				n.Sources = found
+				for _, s := range found {
+					warn(where, "builds with %s beside this repo; pinned to commit %s from your local checkout. Check it matches what is deployed (D18)", s.Repo, s.Commit)
+				}
+			} else {
+				warn(where, "builds from %s, outside this repo, to use other repos beside it; list them in sources, each pinned to a commit (D18)", img.Context)
 			}
 		}
 		if a := img.BuildArgs; a != nil {

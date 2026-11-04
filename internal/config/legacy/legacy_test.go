@@ -80,6 +80,7 @@ func TestConvertGolden(t *testing.T) {
 			r := Convert(load(t, name+".json"), Options{
 				Machine: machine(t), Repo: "example/" + name,
 				RunningCommit: func(img string) string { return pins[img] },
+				BuildSources:  siblingLib,
 			})
 			got := render(t, r)
 			path := filepath.Join("testdata", name+".golden")
@@ -97,6 +98,23 @@ func TestConvertGolden(t *testing.T) {
 				t.Fatalf("%s differs from the golden file; run go test ./internal/config/legacy -update and review the diff\n\n%s", name, got)
 			}
 		})
+	}
+}
+
+// siblingLib stands in for the CLI's detection of a shared library cloned
+// beside the repo.
+func siblingLib(img Image) []config.BuildSource {
+	if img.Name == "booking-api" {
+		return []config.BuildSource{{Repo: "example/shared-lib", Path: "shared-lib", Commit: "def5678"}}
+	}
+	return nil
+}
+
+func TestOutsideContextWithoutSourcesNeedsAPerson(t *testing.T) {
+	r := Convert(load(t, "envcopies.json"), Options{Machine: machine(t), Repo: "example/booking"})
+	err := r.Config.Validate()
+	if err == nil || !strings.Contains(err.Error(), "list the other repos the build needs in sources") {
+		t.Fatalf("want the sources problem, got %v", err)
 	}
 }
 
