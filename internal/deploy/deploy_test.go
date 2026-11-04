@@ -593,3 +593,22 @@ func TestNamespaceOwnership(t *testing.T) {
 		}
 	})
 }
+
+type closingBuilder struct {
+	fakeBuilder
+	closed int
+}
+
+func (b *closingBuilder) Close() error { b.closed++; return nil }
+
+func TestBuilderIsClosedAfterTheBuilds(t *testing.T) {
+	h := newHarness(t)
+	cb := &closingBuilder{}
+	h.o.Builder = cb
+	if err := h.run(t); err != nil {
+		t.Fatal(err)
+	}
+	if len(cb.built) != 2 || cb.closed != 1 {
+		t.Errorf("built %d, closed %d", len(cb.built), cb.closed)
+	}
+}

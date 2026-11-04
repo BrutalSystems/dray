@@ -17,12 +17,16 @@ func TestArgs(t *testing.T) {
 	got := strings.Join(Args("tcp://bk:1234", deploy.BuildSpec{
 		Context: "/w", Dockerfile: "/w/app/Dockerfile.prod", Ref: "reg/app:abc", Platform: "linux/arm64",
 		Args: map[string]string{"B": "2", "A": "1"},
-	}, "/tmp/m.json"), " ")
+	}, "/tmp/m.json", ""), " ")
 	want := "--addr tcp://bk:1234 build --frontend dockerfile.v0 --local context=/w --local dockerfile=/w/app " +
 		"--opt filename=Dockerfile.prod --output type=image,name=reg/app:abc,push=true --metadata-file /tmp/m.json " +
 		"--opt platform=linux/arm64 --opt build-arg:A=1 --opt build-arg:B=2"
 	if got != want {
 		t.Errorf("\n got %s\nwant %s", got, want)
+	}
+	cached := strings.Join(Args("a", deploy.BuildSpec{Context: "/w", Dockerfile: "/w/Dockerfile", Ref: "r"}, "m", "reg/cache:app"), " ")
+	if !strings.Contains(cached, "--import-cache type=registry,ref=reg/cache:app --export-cache type=registry,ref=reg/cache:app,mode=max,image-manifest=true,oci-mediatypes=true") {
+		t.Errorf("cache flags: %s", cached)
 	}
 }
 

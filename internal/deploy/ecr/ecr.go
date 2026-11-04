@@ -123,6 +123,23 @@ func (r *Registry) Ensure(ctx context.Context, repo string) error {
 	return err
 }
 
+// CacheRepo is where an image repository's build cache lives:
+// dray-cache/<repo>, created with mutable tags because the cache is
+// overwritten on every build (the image repositories stay immutable).
+func (r *Registry) CacheRepo(ctx context.Context, repo string) (string, error) {
+	name := "dray-cache/" + repo
+	_, err := r.aws(ctx, "ecr", "describe-repositories", "--repository-names", name)
+	if err != nil {
+		if !stderrHas(err, "RepositoryNotFoundException") {
+			return "", err
+		}
+		if _, err := r.aws(ctx, "ecr", "create-repository", "--repository-name", name, "--image-tag-mutability", "MUTABLE"); err != nil {
+			return "", err
+		}
+	}
+	return r.Host() + "/" + name + ":buildcache", nil
+}
+
 // Digest is the digest a tag points at, or "" when the tag or the repository
 // does not exist. Any other failure is an error: mistaking "cannot read" for
 // "missing" would push over an image that is already deployed.

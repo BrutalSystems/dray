@@ -161,9 +161,14 @@ deploys every environment with `on_merge: deploy` using the same code as
 `dray deploy`. Each result is a check run on the commit. One commit per repo
 deploys at a time; merges that arrive meanwhile collapse into the latest.
 
+Builds run in a BuildKit pod started for the deploy and deleted after it, on
+build-only nodes that the autoscaler adds and removes as needed
+(`deploy/kubernetes/builds.yaml`, D23).
+
 Settings: `DRAY_GITHUB_APP_ID`, `DRAY_GITHUB_APP_KEY_FILE`,
-`DRAY_WEBHOOK_SECRET_FILE`. AWS, Kubernetes and the secret store use the
-pod's own identity.
+`DRAY_WEBHOOK_SECRET_FILE`, and optionally `DRAY_BUILD_MEMORY` and
+`DRAY_BUILD_CPU` (default 6Gi, 2). AWS, Kubernetes and the secret store use
+the pod's own identity.
 
 ## License
 

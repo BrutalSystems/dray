@@ -376,6 +376,11 @@ func (s *state) build(ctx context.Context) error {
 	if len(todo) == 0 {
 		return nil
 	}
+	// A builder that holds something for the deploy, such as a build pod,
+	// gives it back when the builds are done.
+	if c, ok := s.o.Builder.(io.Closer); ok {
+		defer func() { _ = c.Close() }()
+	}
 	if err := s.o.Registry.Login(ctx); err != nil {
 		return err
 	}

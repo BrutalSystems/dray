@@ -236,6 +236,22 @@ tarballs, not clones. There is no database yet: results live in GitHub check
 runs and the server's log, and a restart forgets which commits it handled
 (the next CI webhook re-checks).
 
+## D23 · Builds run in a pod per deploy, on nodes that exist only while building
+
+The server does not keep a builder running. For a deploy that builds, it
+starts one rootless BuildKit pod, builds every image of the deploy on it,
+and deletes it. The pod requests all the memory it may use (memory request
+equals its limit), so the scheduler and Karpenter reserve it, and it runs
+only on a `dray-build` NodePool whose nodes carry a taint nothing else
+tolerates. Karpenter starts a build node (spot first, on-demand when there
+is none) when a build pod cannot be placed and removes it a minute after it
+is empty. Builds and other workloads never share a node, so a large build
+cannot squeeze an app, and no node waits for builds; the price is one or two
+minutes for a node to start. A fresh BuildKit has no layer cache, so each
+image's cache is kept in the registry (`dray-cache/<repo>`, mutable tags,
+while image repositories stay immutable). A pod a crashed server leaves
+behind ends after two hours, and its node with it.
+
 ## D12 · Scope kept for later phases
 
 Preview environments per pull request, release groups for services that ship

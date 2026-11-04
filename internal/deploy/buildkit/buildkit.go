@@ -24,6 +24,9 @@ type Builder struct {
 	// DockerConfig is the folder whose config.json holds registry logins for
 	// the push (DOCKER_CONFIG); empty is buildctl's default.
 	DockerConfig string
+	// Cache, when set, names a registry reference to keep the build cache in
+	// for an image reference, so a fresh daemon need not start from nothing.
+	Cache func(ctx context.Context, ref string) (string, error)
 	// Run runs buildctl; nil is execx.Run.
 	Run execx.Runner
 	// Progress receives the build's output; nil discards it.
@@ -37,7 +40,7 @@ var _ deploy.Builder = (*Builder)(nil)
 // Unlike docker, buildctl takes build argument values on its command line.
 // Build arguments are never secrets (D13): anything in them can end up in the
 // image.
-func Args(addr string, b deploy.BuildSpec, meta string) []string {
+func Args(addr string, b deploy.BuildSpec, meta, cache string) []string {
 	args := []string{"--addr", addr, "build",
 		"--frontend", "dockerfile.v0",
 		"--local", "context=" + b.Context,
@@ -48,6 +51,11 @@ func Args(addr string, b deploy.BuildSpec, meta string) []string {
 	}
 	if b.Platform != "" {
 		args = append(args, "--opt", "platform="+b.Platform)
+	}
+	if cache != "" {
+		args = append(args,
+			"--import-cache", "type=registry,ref="+cache,
+			"--export-cache", "type=registry,ref="+cache+",mode=max,image-manifest=true,oci-mediatypes=true")
 	}
 	names := make([]string, 0, len(b.Args))
 	for k := range b.Args {
@@ -79,7 +87,13 @@ func (k *Builder) Build(ctx context.Context, b deploy.BuildSpec) (string, error)
 	if progress == nil {
 		progress = io.Discard
 	}
-	cmd := execx.Cmd{Name: "buildctl", Args: Args(k.Addr, b, meta), Stream: progress}
+	cache := ""
+	if k.Cache != nil {
+		if cache, err = k.Cache(ctx, b.Ref); err != nil {
+			return "", fmt.Errorf("build cache: %w", err)
+		}
+	}
+	cmd := execx.Cmd{Name: "buildctl", Args: Args(k.Addr, b, meta, cache), Stream: progress}
 	if k.DockerConfig != "" {
 		cmd.Env = []string{"DOCKER_CONFIG=" + k.DockerConfig}
 	}

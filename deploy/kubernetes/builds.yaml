@@ -1,0 +1,78 @@
+# Where dray-server's builds run. dray-server starts one BuildKit pod per
+# deploy that builds, and deletes it when the deploy is done; nothing runs
+# between deploys.
+#
+# Build pods request all the memory they may use (DRAY_BUILD_MEMORY), and
+# run only on nodes of the dray-build NodePool, which nothing else tolerates.
+# Karpenter starts a build node when a build pod cannot be placed and
+# removes it a minute after it is empty, so a large build can never squeeze
+# another workload and no node waits for builds.
+#
+#   kubectl apply -f deploy/kubernetes/builds.yaml
+#
+# The NodePool uses the EC2NodeClass named "default"; change nodeClassRef if
+# the cluster's is named otherwise.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dray
+  labels:
+    dray/app: dray
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: dray-build
+spec:
+  template:
+    metadata:
+      labels:
+        dray/build: "true"
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+      taints:
+        - key: dray/build
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: [arm64]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: [spot, on-demand]   # spot when there is any, else on-demand
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: [c, m, r, t]
+        - key: karpenter.k8s.aws/instance-memory
+          operator: Gt
+          values: ["7000"]            # 8 GiB and up: room for a build pod
+      expireAfter: 24h
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 1m
+  limits:
+    cpu: "16"
+    memory: 64Gi
+---
+# Only dray-server may reach a build pod's BuildKit.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: build-pods
+  namespace: dray
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dray-server
+      ports:
+        - port: 1234

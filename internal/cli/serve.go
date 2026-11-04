@@ -19,7 +19,6 @@ import (
 	"github.com/BrutalSystems/dray/internal/config"
 	"github.com/BrutalSystems/dray/internal/deploy"
 	"github.com/BrutalSystems/dray/internal/deploy/buildkit"
-	"github.com/BrutalSystems/dray/internal/deploy/docker"
 	"github.com/BrutalSystems/dray/internal/deploy/ecr"
 	"github.com/BrutalSystems/dray/internal/deploy/kubectl"
 	"github.com/BrutalSystems/dray/internal/githubapp"
@@ -40,8 +39,9 @@ func NewServeCmd() *cobra.Command {
 			"  DRAY_GITHUB_APP_ID          the GitHub App's ID\n" +
 			"  DRAY_GITHUB_APP_KEY_FILE    its private key (PEM)\n" +
 			"  DRAY_WEBHOOK_SECRET_FILE    its webhook secret\n" +
-			"  DRAY_BUILDKIT_ADDR          the BuildKit daemon, such as tcp://buildkitd:1234\n" +
-			"                              (without it, the local Docker builds)\n" +
+			"  DRAY_BUILD_NAMESPACE        where build pods run (default dray)\n" +
+			"  DRAY_BUILD_MEMORY, _CPU     what a build pod reserves (default 6Gi, 2)\n" +
+			"  DRAY_BUILDKIT_ADDR          a long-running BuildKit to use instead of build pods\n" +
 			"AWS, Kubernetes and the secret store use the pod's own identity.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -62,6 +62,13 @@ func readSetting(name string) (string, error) {
 		return "", fmt.Errorf("%s is not set", name)
 	}
 	return v, nil
+}
+
+func settingOr(name, def string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return def
 }
 
 func readSettingFile(name string) ([]byte, error) {
@@ -118,16 +125,35 @@ func inClusterAdapters(c *config.RepoConfig, env string, e config.Environment, t
 		return server.Adapters{}, fmt.Errorf("target cloud %q is not supported", t.Cloud)
 	}
 	reg := &ecr.Registry{Account: t.Account, Region: t.Region}
-	var builder deploy.Builder = &docker.Builder{Progress: out}
+	// No Docker in the server's image: the registry login goes into a config
+	// file that buildctl hands to BuildKit for the push.
+	dir, err := os.MkdirTemp("", "dray-docker-")
+	if err != nil {
+		return server.Adapters{}, err
+	}
+	reg.DockerConfig = dir
+	kb := buildkit.Builder{
+		DockerConfig: dir, Progress: out,
+		Cache: func(ctx context.Context, ref string) (string, error) {
+			repo := strings.TrimPrefix(ref, reg.Host()+"/")
+			if i := strings.LastIndex(repo, ":"); i >= 0 {
+				repo = repo[:i]
+			}
+			return reg.CacheRepo(ctx, repo)
+		},
+	}
+	var builder deploy.Builder
 	if addr := os.Getenv("DRAY_BUILDKIT_ADDR"); addr != "" {
-		// No Docker in the server's image: the registry login goes into a
-		// config file that buildctl hands to the daemon for the push.
-		dir, err := os.MkdirTemp("", "dray-docker-")
-		if err != nil {
-			return server.Adapters{}, err
+		kb.Addr = addr
+		builder = &kb
+	} else {
+		builder = &buildkit.PodBuilder{
+			Builder:   kb,
+			Namespace: settingOr("DRAY_BUILD_NAMESPACE", "dray"),
+			Memory:    settingOr("DRAY_BUILD_MEMORY", "6Gi"),
+			CPU:       settingOr("DRAY_BUILD_CPU", "2"),
+			Arch:      strings.TrimPrefix(t.Platform, "linux/"),
 		}
-		reg.DockerConfig = dir
-		builder = &buildkit.Builder{Addr: addr, DockerConfig: dir, Progress: out}
 	}
 	ad := server.Adapters{
 		Registry: reg,
