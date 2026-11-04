@@ -1,0 +1,16 @@
+{
+  "name": "booking",
+  "_prod_note": "PRODUCTION entries are additive copies of the dev ones.",
+  "defaults": { "namespace": "booking", "context": "other-cluster", "account": "000000000000", "region": "eu-west-1", "profile": "booking-deploy", "platform": "linux/amd64" },
+  "images": [
+    { "name": "booking-api", "ecr": "booking-api", "source": { "local": true }, "dockerfile": "Dockerfile", "context": "..",
+      "buildArgs": { "sopsEnvFile": "build.sops.env", "prefix": "APP_" } },
+    { "name": "booking-api-prod", "ecr": "booking-api-prod", "source": { "local": true }, "dockerfile": "Dockerfile", "context": "." }
+  ],
+  "workloads": [
+    { "name": "booking-api", "kind": "deployment", "image": "booking-api", "manifests": [".k8s/api.yaml"] },
+    { "name": "booking-api-prod", "kind": "deployment", "image": "booking-api-prod", "namespace": "booking-prod", "manifests": [".k8s/prod/api.yaml"] }
+  ],
+  "secrets": [ { "name": "booking-env", "kind": "literal-from-env", "file": "env.sops", "reflector": { "reflector.v1.k8s.emberstack.com/reflection-allowed": "true" } } ],
+  "pilets": []
+}

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BrutalSystems/dray/blob/v2/schema/registry.schema.json",
+  "$defs": {
+    "Environment": {
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Target names a cluster and account from the server's config."
+        },
+        "namespace": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "Namespace is the Kubernetes namespace."
+        },
+        "namespace_mode": {
+          "type": "string",
+          "enum": [
+            "owned",
+            "shared"
+          ],
+          "description": "NamespaceMode is owned (the app's alone, the default) or shared with\nother apps, which then may change only resources they own."
+        },
+        "release": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "gitops",
+            "feed"
+          ],
+          "description": "Release is how changes reach the environment."
+        },
+        "approval": {
+          "type": "string",
+          "enum": [
+            "none",
+            "passkey",
+            "chat"
+          ],
+          "description": "Approval is who must say yes before a change applies."
+        },
+        "ci_required": {
+          "type": "boolean",
+          "description": "CIRequired refuses to deploy a commit unless CI passed on it."
+        },
+        "on_merge": {
+          "type": "string",
+          "enum": [
+            "off",
+            "deploy"
+          ],
+          "description": "OnMerge deploys when CI finishes green on the main branch; for an\nenvironment that needs approval it only opens the request."
+        },
+        "promote_from": {
+          "type": "string",
+          "description": "PromoteFrom is the environment whose verified artifact this one takes."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "target",
+        "namespace",
+        "release",
+        "approval"
+      ],
+      "description": "Environment is one place an app may deploy."
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "description": "Name is the app's name; it matches the repo's .dray/config.yaml."
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "description": "Repo is the GitHub repository, owner/name."
+    },
+    "path": {
+      "type": "string",
+      "description": "Path is the app's folder inside the repo, when it is not the root."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "app",
+        "component"
+      ],
+      "description": "Kind is app (the default) or component."
+    },
+    "release_on": {
+      "type": "string",
+      "enum": [
+        "tag"
+      ],
+      "description": "ReleaseOn says when a component builds a version: on a version tag."
+    },
+    "environments": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Environment"
+      },
+      "type": "object",
+      "description": "Environments are where an app may deploy, by name (dev, staging, prod)."
+    },
+    "third_party": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "ThirdParty lists upstream images this app may run, mirrored by digest."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "name",
+    "repo"
+  ],
+  "title": "Dray registry entry",
+  "description": "RegistryEntry is an app's file in the registry: which repo it is, where it may deploy, and who approves."
+}

@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BrutalSystems/dray/blob/v2/schema/config.schema.json",
+  "$defs": {
+    "BuildArgs": {
+      "properties": {
+        "env_file": {
+          "type": "string",
+          "description": "EnvFile is a dotenv file in the repo, such as .env.production."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Prefix keeps only variables whose names start with it, such as VITE_."
+        },
+        "values": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Values are explicit name=value pairs."
+        },
+        "from_secret": {
+          "$ref": "#/$defs/SecretRef",
+          "description": "FromSecret reads dotenv-style values from the secret store."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BuildArgs are build-time values."
+    },
+    "Duration": {
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+      "description": "A duration such as 600s or 10m."
+    },
+    "Image": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "Name is how workloads refer to the image."
+        },
+        "repository": {
+          "type": "string",
+          "description": "Repository is the container repository name; defaults to Name."
+        },
+        "dockerfile": {
+          "type": "string",
+          "description": "Dockerfile is relative to the repo root; defaults to \"Dockerfile\"."
+        },
+        "context": {
+          "type": "string",
+          "description": "Context is the build context, relative to the repo root; defaults to \".\"."
+        },
+        "template_var": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "description": "TemplateVar is the placeholder manifests use for this image; defaults to\nNAME_IMAGE (upper snake case), as in ${API_IMAGE}."
+        },
+        "build_args": {
+          "$ref": "#/$defs/BuildArgs",
+          "description": "BuildArgs are passed to the build as --build-arg values."
+        },
+        "build_per_environment": {
+          "type": "boolean",
+          "description": "BuildPerEnvironment rebuilds the image for each environment from the same\ncommit instead of promoting one image. Set it for front ends that bake\nenvironment settings in at build time."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "Image is a container image built from this repo."
+    },
+    "Pilets": {
+      "properties": {
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Names are the pilets this repo publishes."
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Command publishes one pilet; \"{name}\" is replaced with the pilet's name."
+        },
+        "env": {
+          "$ref": "#/$defs/SecretRef",
+          "description": "Env is passed to the command as environment variables, such as the feed key."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "names",
+        "command"
+      ],
+      "description": "Pilets are Piral micro-frontends published from this repo."
+    },
+    "Secret": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-.a-z0-9]*[a-z0-9])?$",
+          "description": "Name is the Kubernetes Secret's name."
+        },
+        "from": {
+          "$ref": "#/$defs/SecretRef",
+          "description": "From is where its values live in the secret store."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "from"
+      ],
+      "description": "Secret is a Kubernetes Secret filled from the secret store."
+    },
+    "SecretRef": {
+      "type": "string",
+      "pattern": "^secret:[a-z0-9][-a-z0-9_.]*(/[a-z0-9][-a-z0-9_.]*)+(#[A-Za-z_][A-Za-z0-9_.-]*)?$",
+      "description": "A secret in the secret store: secret:\u003cscope\u003e/\u003cname\u003e, optionally #\u003ckey\u003e."
+    },
+    "Use": {
+      "properties": {
+        "component": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "Component is the component's registry name, such as jobs-service."
+        },
+        "version": {
+          "type": "string",
+          "description": "Version is a released version of the component, such as 1.8.0."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7",
+          "description": "Commit pins a commit instead of a version, for components that have not\nstarted tagging releases yet."
+        },
+        "as": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "As is the name workloads use for this image; defaults to Component."
+        },
+        "template_var": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "description": "TemplateVar is the placeholder manifests use; defaults to AS_IMAGE."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "component"
+      ],
+      "description": "Use pins a shared component this app deploys."
+    },
+    "Workload": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "Name is the workload's name; for a deployment, the Deployment's name."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "deployment",
+            "cronjob"
+          ],
+          "description": "Kind decides how Dray waits for it: deployments roll out, cronjobs are applied."
+        },
+        "images": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Images are stamped into the manifests by digest. Names refer to images\nbuilt here or to components in uses. Empty for a workload whose images are\nall third-party."
+        },
+        "manifests": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Manifests are relative to the repo root."
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "DependsOn lists workloads that must be applied first."
+        },
+        "secrets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Secrets lists secrets (by name) that must exist before this workload."
+        },
+        "manual": {
+          "type": "boolean",
+          "description": "Manual workloads ship only when named, never in a whole-repo deploy."
+        },
+        "disabled": {
+          "type": "boolean",
+          "description": "Disabled workloads are kept in the config but never deployed."
+        },
+        "rollout_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "RolloutTimeout is how long to wait for a rollout; defaults to 600s,\nKubernetes' own progress deadline."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "kind",
+        "manifests"
+      ],
+      "description": "Workload is a set of manifests deployed together."
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "description": "Name is the app's name. It must match the app's registry entry."
+    },
+    "images": {
+      "items": {
+        "$ref": "#/$defs/Image"
+      },
+      "type": "array",
+      "description": "Images are built from this repo."
+    },
+    "uses": {
+      "items": {
+        "$ref": "#/$defs/Use"
+      },
+      "type": "array",
+      "description": "Uses pins shared components that this app deploys but does not build."
+    },
+    "workloads": {
+      "items": {
+        "$ref": "#/$defs/Workload"
+      },
+      "type": "array",
+      "description": "Workloads are what gets deployed: manifests plus the images stamped into them."
+    },
+    "secrets": {
+      "items": {
+        "$ref": "#/$defs/Secret"
+      },
+      "type": "array",
+      "description": "Secrets are Kubernetes Secrets the workloads need, filled from the secret store."
+    },
+    "pilets": {
+      "$ref": "#/$defs/Pilets",
+      "description": "Pilets are Piral micro-frontends published to a feed."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "name"
+  ],
+  "title": "Dray repo config (.dray/config.yaml)",
+  "description": "RepoConfig is a repo's .dray/config.yaml: what to build and what to deploy."
+}

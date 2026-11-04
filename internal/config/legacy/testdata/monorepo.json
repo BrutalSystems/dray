@@ -1,0 +1,20 @@
+{
+  "name": "shop",
+  "_note": "One repo, several services, one of them built from a shared repo.",
+  "defaults": { "namespace": "team-a", "ciGate": true },
+  "images": [
+    { "name": "shop-api", "ecr": "shop-api", "source": { "local": true }, "dockerfile": "Dockerfile", "context": ".",
+      "depsImage": { "dockerfile": "Dockerfile.deps", "tag": "shop-api:deps", "rebuildOn": ["uv.lock"] }, "latest": true },
+    { "name": "queue", "ecr": "queue", "source": { "git": "https://github.com/example/queue-service", "ref": "main" }, "dockerfile": "Dockerfile", "context": "." }
+  ],
+  "workloads": [
+    { "name": "shop-api", "kind": "deployment", "image": "shop-api", "manifests": [".k8s/api.yaml"], "stampImages": ["shop-api"],
+      "dependsOn": ["secret:shop-secrets", "queue"], "_note": "Talks to queue over HTTP." },
+    { "name": "shop-worker", "kind": "deployment", "image": "shop-api", "manifests": [".k8s/worker.yaml"], "stampImages": ["shop-api"], "rolloutTimeoutSeconds": 900 },
+    { "name": "nightly", "kind": "cronjob", "image": "shop-api", "manifests": [".k8s/nightly.yaml"], "stampImages": ["shop-api"] },
+    { "name": "queue", "kind": "deployment", "image": "queue", "manifests": [".k8s/queue.yaml"], "stampImages": ["queue"], "manual": true },
+    { "name": "old-thing", "kind": "deployment", "image": "shop-api", "manifests": [".k8s/old.yaml"], "disabled": true },
+    { "name": "search", "kind": "deployment", "manifests": [".k8s/search.yaml"] }
+  ],
+  "secrets": [ { "name": "shop-secrets", "kind": "sops-manifest", "file": ".k8s/secrets.enc.yaml" } ]
+}

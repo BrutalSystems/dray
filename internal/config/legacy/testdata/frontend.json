@@ -1,0 +1,11 @@
+{
+  "name": "shop-web",
+  "defaults": { "namespace": "team-a" },
+  "images": [
+    { "name": "shop-web", "ecr": "team-shop-web", "source": { "local": true }, "dockerfile": "Dockerfile", "context": ".",
+      "buildArgs": { "envFile": ".env.production", "prefix": "VITE_" } }
+  ],
+  "workloads": [ { "name": "shop-web", "kind": "deployment", "image": "shop-web", "manifests": [".k8s/web.yaml"], "stampImages": ["shop-web"] } ],
+  "secrets": [],
+  "pilets": { "secretsFile": "secrets.env", "command": ["npm", "run", "publish:pilet", "--", "--pilet", "{name}"], "names": ["cart", "orders"] }
+}

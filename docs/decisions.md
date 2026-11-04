@@ -126,6 +126,13 @@ that needs approval, on-merge only opens the approval request. GitHub
 workflows need no deploy step and hold no deploy credentials. Pilets can
 publish when their version changes the same way.
 
+Many repos deploy today by running the JS tool from GitHub Actions, each with
+a cloud deploy role and decryption keys stored for the workflow. For the
+cutover, the Go CLI keeps the JS tool's command names (`ship`, `push`,
+`apply`, `rollout`, `status`, `rollback`, `publish`, `secrets sync`), so a
+workflow switches by changing only its install step. Each repo then moves to
+`on_merge` and its workflow drops the deploy role and keys.
+
 ## D17 · Third-party images are mirrored into the cluster's registry by digest
 
 The registry lists approved upstream images. When a manifest names one by

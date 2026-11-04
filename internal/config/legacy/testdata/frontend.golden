@@ -1,0 +1,55 @@
+# --- .dray/config.yaml
+name: shop-web
+images:
+  - name: shop-web
+    repository: team-shop-web
+    build_args:
+      env_file: .env.production
+      prefix: VITE_
+    build_per_environment: true
+workloads:
+  - name: shop-web
+    kind: deployment
+    images:
+      - shop-web
+    manifests:
+      - .k8s/web.yaml
+pilets:
+  names:
+    - cart
+    - orders
+  command:
+    - npm
+    - run
+    - publish:pilet
+    - --
+    - --pilet
+    - '{name}'
+  env: secret:shop-web/pilets
+
+# --- registry entry
+name: shop-web
+repo: example/frontend
+environments:
+  prod:
+    target: main-cluster
+    namespace: team-a
+    namespace_mode: shared
+    release: direct
+    approval: none
+
+# --- target main-cluster
+name: main-cluster
+cloud: aws
+account: "111111111111"
+region: us-east-2
+cluster: main-cluster
+profile: dev
+platform: linux/arm64
+
+# --- warnings
+- images[0] shop-web: bakes environment settings in at build time, so it is rebuilt per environment instead of promoted (D13)
+- pilets: publish values from secrets.env now come from secret:shop-web/pilets; import them with dray secrets import
+- registry: the prod environment keeps today's behavior: namespace team-a marked shared (D15), direct apply, no approval. Tighten it once the app is on Dray
+# --- validation
+ok

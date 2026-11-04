@@ -10,7 +10,9 @@ import (
 )
 
 func main() {
-	if err := cli.NewRoot("dray", "Deploy code from Git to its targets").Execute(); err != nil {
+	root := cli.NewRoot("dray", "Deploy code from Git to its targets")
+	root.AddCommand(cli.NewConfigCmd())
+	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

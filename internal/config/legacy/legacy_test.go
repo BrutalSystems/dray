@@ -1,0 +1,207 @@
+package legacy
+
+import (
+	"bytes"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/BrutalSystems/dray/internal/config"
+)
+
+var update = flag.Bool("update", false, "rewrite golden files")
+
+func load(t *testing.T, name string) *Config {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name)) //nolint:gosec // test fixture
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func machine(t *testing.T) Defaults {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "machine.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ParseMachine(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// render writes everything a conversion produces, so one golden file shows
+// the whole result for review.
+func render(t *testing.T, r *Result) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	section := func(title string, v any, c *config.Comments) {
+		out, err := config.EncodeYAML(v, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&b, "# --- %s\n%s\n", title, out)
+	}
+	section(".dray/config.yaml", r.Config, &r.Comments)
+	section("registry entry", r.Registry, nil)
+	for _, c := range r.Components {
+		section("component "+c.Name, c, nil)
+	}
+	for _, tg := range r.Targets {
+		section("target "+tg.Name, tg, nil)
+	}
+	b.WriteString("# --- warnings\n")
+	for _, w := range r.Warnings {
+		fmt.Fprintf(&b, "- %s\n", w)
+	}
+	b.WriteString("# --- validation\n")
+	if err := r.Config.Validate(); err != nil {
+		b.WriteString(err.Error() + "\n")
+	} else {
+		b.WriteString("ok\n")
+	}
+	return b.Bytes()
+}
+
+func TestConvertGolden(t *testing.T) {
+	pins := map[string]string{"queue": "abc1234"}
+	for _, name := range []string{"monorepo", "frontend", "envcopies"} {
+		t.Run(name, func(t *testing.T) {
+			r := Convert(load(t, name+".json"), Options{
+				Machine: machine(t), Repo: "example/" + name,
+				RunningCommit: func(img string) string { return pins[img] },
+			})
+			got := render(t, r)
+			path := filepath.Join("testdata", name+".golden")
+			if *update {
+				if err := os.WriteFile(path, got, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			want, err := os.ReadFile(path) //nolint:gosec // test fixture
+			if err != nil {
+				t.Fatalf("%v (run with -update)", err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("%s differs from the golden file; run go test ./internal/config/legacy -update and review the diff\n\n%s", name, got)
+			}
+		})
+	}
+}
+
+func TestConvertedConfigsRoundTrip(t *testing.T) {
+	for _, name := range []string{"monorepo", "frontend"} {
+		r := Convert(load(t, name+".json"), Options{
+			Machine: machine(t), Repo: "example/" + name,
+			RunningCommit: func(string) string { return "abc1234" },
+		})
+		out, err := config.EncodeYAML(r.Config, &r.Comments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.ParseRepoConfig(out); err != nil {
+			t.Errorf("%s: written config does not read back: %v\n%s", name, err, out)
+		}
+		reg, err := config.EncodeYAML(r.Registry, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.ParseRegistryEntry(reg); err != nil {
+			t.Errorf("%s: registry draft does not read back: %v\n%s", name, err, reg)
+		}
+	}
+}
+
+func TestParseRejectsUnknownKeys(t *testing.T) {
+	_, err := Parse([]byte(`{"name":"x","images":[{"name":"a","ecr":"a","source":{"local":true},"buildArg":{}}]}`))
+	if err == nil || !strings.Contains(err.Error(), "buildArg") {
+		t.Fatalf("want an error naming the unknown key, got %v", err)
+	}
+}
+
+func TestParseKeepsNotes(t *testing.T) {
+	c := load(t, "monorepo.json")
+	if c.Notes["_note"] == "" {
+		t.Error("top-level _note was dropped")
+	}
+	if len(c.Workloads[0].Notes) != 1 {
+		t.Errorf("workload note: got %v", c.Workloads[0].Notes)
+	}
+}
+
+func TestEmptyPiletsList(t *testing.T) {
+	c := load(t, "envcopies.json")
+	if c.Pilets != nil {
+		t.Errorf(`"pilets": [] should mean no pilets, got %+v`, c.Pilets)
+	}
+}
+
+func TestUnpinnedComponentNeedsAPerson(t *testing.T) {
+	r := Convert(load(t, "monorepo.json"), Options{Machine: machine(t), Repo: "example/shop"})
+	err := r.Config.Validate()
+	if err == nil || !strings.Contains(err.Error(), "pin queue-service") {
+		t.Fatalf("an unpinned component must fail validation, got %v", err)
+	}
+}
+
+func TestComponentFromGit(t *testing.T) {
+	cases := map[string][2]string{
+		"https://github.com/example/queue-service":     {"queue-service", "example/queue-service"},
+		"https://github.com/example/Queue-Service.git": {"queue-service", "example/Queue-Service"},
+		"git@github.com:example/queue.git":             {"queue", "example/queue"},
+		"https://gitlab.com/group/sub/thing":           {"thing", ""},
+	}
+	for in, want := range cases {
+		name, repo := componentFromGit(in)
+		if name != want[0] || repo != want[1] {
+			t.Errorf("componentFromGit(%q) = %q, %q; want %q, %q", in, name, repo, want[0], want[1])
+		}
+	}
+}
+
+// TestRealConfigs converts every config in a JS-tool registry. It runs only
+// when DRAY_LEGACY_REGISTRY points at one (such as ~/.dray/registry.json), so
+// no real app's details ever enter this public repo.
+func TestRealConfigs(t *testing.T) {
+	path := os.Getenv("DRAY_LEGACY_REGISTRY")
+	if path == "" {
+		t.Skip("set DRAY_LEGACY_REGISTRY to a JS-tool registry.json to run")
+	}
+	entries := readRegistry(t, path)
+	var failed int
+	for name, raw := range entries {
+		c, err := Parse(raw)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			failed++
+			continue
+		}
+		r := Convert(c, Options{Repo: "example/" + name, RunningCommit: func(string) string { return "abc1234" }})
+		if err := r.Config.Validate(); err != nil {
+			t.Logf("%s: needs a person: %v", name, err)
+			failed++
+		}
+		out, err := config.EncodeYAML(r.Config, &r.Comments)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if r.Config.Validate() == nil {
+			if _, err := config.ParseRepoConfig(out); err != nil {
+				t.Errorf("%s: written config does not read back: %v", name, err)
+			}
+		}
+		t.Logf("%s: %d warning(s)", name, len(r.Warnings))
+	}
+	t.Logf("%d of %d configs convert and validate without help", len(entries)-failed, len(entries))
+}

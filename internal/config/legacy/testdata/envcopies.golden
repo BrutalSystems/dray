@@ -1,0 +1,62 @@
+# --- .dray/config.yaml
+# Note carried over from the old config (_prod_note):
+# PRODUCTION entries are additive copies of the dev ones.
+name: booking
+images:
+  - name: booking-api
+    context: ..
+    build_args:
+      prefix: APP_
+      from_secret: secret:booking/build-booking-api
+    build_per_environment: true
+  - name: booking-api-prod
+workloads:
+  - name: booking-api
+    kind: deployment
+    images:
+      - booking-api
+    manifests:
+      - .k8s/api.yaml
+  - name: booking-api-prod
+    kind: deployment
+    images:
+      - booking-api-prod
+    manifests:
+      - .k8s/prod/api.yaml
+secrets:
+  - name: booking-env
+    from: secret:booking/booking-env
+
+# --- registry entry
+name: booking
+repo: example/envcopies
+environments:
+  prod:
+    target: other-cluster
+    namespace: booking
+    namespace_mode: shared
+    release: direct
+    approval: none
+
+# --- target other-cluster
+name: other-cluster
+cloud: aws
+account: "000000000000"
+region: eu-west-1
+cluster: other-cluster
+profile: booking-deploy
+platform: linux/amd64
+
+# --- warnings
+- images[0] booking-api: builds from .., outside this repo (usually to copy in a sibling repo such as a shared library). Dray builds from a clean clone of one repo, so this needs a different source before the image can build
+- images[0] booking-api: build values from build.sops.env now come from secret:booking/build-booking-api; import them with dray secrets import. They end up in the image, and in a front end they are public: check none is a real secret
+- images[0] booking-api: bakes environment settings in at build time, so it is rebuilt per environment instead of promoted (D13)
+- images[1] booking-api-prod: looks like a copy for another environment; map it to an environment instead (D11)
+- secrets[0] booking-env: was copied to other namespaces with reflector annotations; use a ClusterExternalSecret instead
+- secrets: 1 secret(s) now come from the secret store; import their values with dray secrets import (D5)
+- workloads[1] booking-api-prod: deploys to namespace booking-prod instead of booking; map it to its own environment (D11)
+- workloads[1] booking-api-prod: looks like a copy for another environment; map it to an environment instead (D11)
+- registry: the prod environment keeps today's behavior: namespace booking marked shared (D15), direct apply, no approval. Tighten it once the app is on Dray
+# --- validation
+invalid config:
+  - images[0].context: ".." must stay inside the repo
