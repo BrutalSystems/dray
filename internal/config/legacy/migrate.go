@@ -80,7 +80,7 @@ func Convert(old *Config, opts Options) *Result {
 	}
 
 	appSecret := func(name string) config.SecretRef {
-		return config.SecretRef("secret:" + old.Name + "/" + name)
+		return config.SecretRef("secret:" + SecretPath(old.Name, name))
 	}
 
 	// Images: built here, or pinned components when they came from another repo.

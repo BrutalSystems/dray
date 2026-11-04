@@ -22,6 +22,17 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    services:
+      # A throwaway dev server for the openbao adapter's conformance tests.
+      openbao:
+        image: quay.io/openbao/openbao:2.7.1
+        env:
+          BAO_DEV_ROOT_TOKEN_ID: ci-root
+        ports:
+          - 8200:8200
+    env:
+      DRAY_TEST_OPENBAO_ADDR: http://127.0.0.1:8200
+      DRAY_TEST_OPENBAO_TOKEN: ci-root
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

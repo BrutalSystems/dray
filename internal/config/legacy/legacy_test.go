@@ -223,3 +223,31 @@ func TestRealConfigs(t *testing.T) {
 	}
 	t.Logf("%d of %d configs convert and validate without help", len(entries)-failed, len(entries))
 }
+
+func TestSecretSourcesMatchConvertedReferences(t *testing.T) {
+	for _, name := range []string{"monorepo", "frontend", "envcopies"} {
+		old := load(t, name+".json")
+		r := Convert(old, Options{Machine: machine(t), Repo: "example/" + name})
+		refs := map[string]bool{}
+		for _, s := range r.Config.Secrets {
+			refs[string(s.From)] = true
+		}
+		for _, img := range r.Config.Images {
+			if img.BuildArgs != nil && img.BuildArgs.FromSecret != "" {
+				refs[string(img.BuildArgs.FromSecret)] = true
+			}
+		}
+		if r.Config.Pilets != nil && r.Config.Pilets.Env != "" {
+			refs[string(r.Config.Pilets.Env)] = true
+		}
+		sources := SecretSources(old)
+		if len(sources) != len(refs) {
+			t.Errorf("%s: %d sources for %d references", name, len(sources), len(refs))
+		}
+		for _, s := range sources {
+			if !refs["secret:"+s.Path] {
+				t.Errorf("%s: source %s matches no reference in the converted config (%v)", name, s.Path, refs)
+			}
+		}
+	}
+}
