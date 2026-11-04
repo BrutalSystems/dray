@@ -165,6 +165,12 @@ Builds run in a BuildKit pod started for the deploy and deleted after it, on
 build-only nodes that the autoscaler adds and removes as needed
 (`deploy/kubernetes/builds.yaml`, D23).
 
+The GitHub App needs: contents read, actions read, checks write, metadata
+read, the `workflow_run` event, and to be private. Create it however you
+manage GitHub Apps (GitHub's manifest flow makes it one click), store its ID,
+private key and webhook secret in your secret store, and install it only on
+the repos Dray deploys.
+
 Settings: `DRAY_GITHUB_APP_ID`, `DRAY_GITHUB_APP_KEY_FILE`,
 `DRAY_WEBHOOK_SECRET_FILE`, and optionally `DRAY_BUILD_MEMORY` and
 `DRAY_BUILD_CPU` (default 6Gi, 2). AWS, Kubernetes and the secret store use

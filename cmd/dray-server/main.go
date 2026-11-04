@@ -12,7 +12,7 @@ import (
 
 func main() {
 	root := cli.NewRoot("dray-server", "Run the Dray server")
-	root.AddCommand(cli.NewServeCmd(), cli.NewSetupCmd())
+	root.AddCommand(cli.NewServeCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
