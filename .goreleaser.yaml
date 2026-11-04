@@ -1,0 +1,61 @@
+version: 2
+
+project_name: dray
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: dray
+    main: ./cmd/dray
+    binary: dray
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/BrutalSystems/dray/internal/version.Version={{.Version}}
+      - -X github.com/BrutalSystems/dray/internal/version.Commit={{.FullCommit}}
+      - -X github.com/BrutalSystems/dray/internal/version.Date={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: dray-server
+    main: ./cmd/dray-server
+    binary: dray-server
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/BrutalSystems/dray/internal/version.Version={{.Version}}
+      - -X github.com/BrutalSystems/dray/internal/version.Commit={{.FullCommit}}
+      - -X github.com/BrutalSystems/dray/internal/version.Date={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: dray
+    ids: [dray]
+    name_template: "dray_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+  - id: dray-server
+    ids: [dray-server]
+    name_template: "dray-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+
+# Publishing (GitHub release, Homebrew tap, server image) is added when the
+# first release is cut; CI only builds snapshots for now.
+release:
+  disable: true
