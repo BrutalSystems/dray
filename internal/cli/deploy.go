@@ -21,9 +21,9 @@ import (
 
 // deployFlags are dray deploy's flags.
 type deployFlags struct {
-	cfgPath, env, repoConfig            string
-	workloads                           []string
-	dryRun, allowDirty, skipCI, restart bool
+	cfgPath, env, repoConfig, awsProfile string
+	workloads                            []string
+	dryRun, allowDirty, skipCI, restart  bool
 }
 
 // NewDeployCmd is `dray deploy` (also `dray ship`, the JS tool's name):
@@ -57,6 +57,7 @@ func NewDeployCmd() *cobra.Command {
 	fl := cmd.Flags()
 	fl.StringVar(&f.cfgPath, "config", "", "your own settings file (default $DRAY_CONFIG or ~/.config/dray/config.yaml)")
 	fl.StringVar(&f.env, "env", "", "environment to deploy to (default: the app's only environment)")
+	fl.StringVar(&f.awsProfile, "aws-profile", "", "AWS profile for this deploy, instead of the one your settings give the account")
 	fl.StringVar(&f.repoConfig, "repo-config", "", "read the repo's config from this file instead of .dray/config.yaml, to try a repo before it moves")
 	fl.StringArrayVar(&f.workloads, "workload", nil, "deploy only this workload (repeatable; a manual workload ships only when named)")
 	fl.BoolVar(&f.dryRun, "dry-run", false, "show what would change; build, push and apply nothing")
@@ -103,6 +104,9 @@ func runDeploy(cmd *cobra.Command, dir string, f deployFlags) error {
 
 	inCI := os.Getenv("GITHUB_ACTIONS") == "true"
 	profile := u.AWSProfiles[target.Account]
+	if f.awsProfile != "" {
+		profile = f.awsProfile
+	}
 	if inCI {
 		// In GitHub Actions credentials arrive through OIDC as environment
 		// variables; a named profile does not exist there.
