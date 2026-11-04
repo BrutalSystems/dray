@@ -186,11 +186,13 @@ func newServer(ctx context.Context) (*server.Server, error) {
 	d := &server.Deployer{Adapters: func(c *config.RepoConfig, env string, e config.Environment, t config.Target, out io.Writer) (server.Adapters, error) {
 		return inClusterAdapters(c, env, e, t, out, login)
 	}}
-	return &server.Server{
+	s := &server.Server{
 		Apps:   apps,
 		Deploy: d.Deploy,
 		Log:    slog.New(slog.NewJSONHandler(os.Stderr, nil)),
-	}, nil
+	}
+	d.Note = s.Note
+	return s, nil
 }
 
 // appRole is the vault role an app's deploy signs in as.

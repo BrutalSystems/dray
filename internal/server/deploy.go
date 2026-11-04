@@ -40,6 +40,8 @@ type Deployer struct {
 	Adapters AdapterFactory
 	// TempDir holds downloaded commits; empty is the system's.
 	TempDir string
+	// Note, when set, records each environment's outcome (Server.Note).
+	Note func(Record)
 }
 
 // Deploy is a Server's Deploy function: download the commit, then deploy
@@ -113,6 +115,10 @@ func (d *Deployer) deployEnv(ctx context.Context, api RepoAPI, t Trigger, root, 
 		_ = api.UpdateCheck(ctx, t.Repo, id, githubapp.Check{
 			Status: "completed", Conclusion: conclusion, Title: title, Summary: summary, Text: fence(log),
 		})
+		if d.Note != nil {
+			d.Note(Record{Repo: t.Repo, SHA: t.SHA, What: c.Name + " → " + envName, Result: conclusion + ": " + title,
+				URL: fmt.Sprintf("https://github.com/%s/runs/%d", t.Repo, id)})
+		}
 	}
 	if env.Release != "direct" || env.Approval != "none" {
 		finish("neutral", "Not deployed: needs a release Dray cannot do on merge yet",

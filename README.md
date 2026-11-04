@@ -161,6 +161,10 @@ each `.dray/config.yaml` in it (an app at the root or in subfolders), and
 deploys every environment with `on_merge: deploy` using the same code as
 `dray deploy`. Each result is a check run on the commit. One commit per repo
 deploys at a time; merges that arrive meanwhile collapse into the latest.
+GitHub's checks are the server's memory: a commit that already carries one of
+its App's deploy checks is not deployed again, even after a restart. Recent
+outcomes are at `/status` (`?format=json`), which is not exposed publicly:
+reach it with `kubectl port-forward`.
 
 Builds run in a BuildKit pod started for the deploy and deleted after it, on
 build-only nodes that the autoscaler adds and removes as needed

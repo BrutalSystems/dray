@@ -268,6 +268,31 @@ func (c *Client) Tarball(ctx context.Context, repo, ref string, w io.Writer) err
 	return err
 }
 
+// CheckRun is a check run already on a commit.
+type CheckRun struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion"`
+	StartedAt  time.Time `json:"started_at"`
+	HTMLURL    string    `json:"html_url"`
+	App        struct {
+		ID int64 `json:"id"`
+	} `json:"app"`
+}
+
+// ChecksForCommit are the check runs on a commit, from every App.
+func (c *Client) ChecksForCommit(ctx context.Context, repo, sha string) ([]CheckRun, error) {
+	var out struct {
+		CheckRuns []CheckRun `json:"check_runs"`
+	}
+	path := fmt.Sprintf("/repos/%s/commits/%s/check-runs?per_page=100", repo, url.PathEscape(sha))
+	if err := c.call(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.CheckRuns, nil
+}
+
 // Check is a check run's state.
 type Check struct {
 	Name       string

@@ -9,11 +9,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
+	"text/tabwriter"
+	"time"
 
 	"github.com/BrutalSystems/dray/internal/githubapp"
 )
@@ -21,6 +25,7 @@ import (
 // RepoAPI is what the server needs from GitHub for one installation.
 type RepoAPI interface {
 	RunsForCommit(ctx context.Context, repo, sha string) ([]githubapp.Run, error)
+	ChecksForCommit(ctx context.Context, repo, sha string) ([]githubapp.CheckRun, error)
 	Tarball(ctx context.Context, repo, ref string, w io.Writer) error
 	CreateCheck(ctx context.Context, repo, sha string, k githubapp.Check) (int64, error)
 	UpdateCheck(ctx context.Context, repo string, id int64, k githubapp.Check) error
@@ -62,6 +67,54 @@ type Server struct {
 	queues  map[string]*queue
 	handled map[string]bool // repo@sha already taken
 	wg      sync.WaitGroup
+	recent  []Record
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+}
+
+// Record is one thing the server did with a commit, for /status.
+type Record struct {
+	Time   time.Time `json:"time"`
+	Repo   string    `json:"repo"`
+	SHA    string    `json:"sha"`
+	What   string    `json:"what"`
+	Result string    `json:"result"`
+	URL    string    `json:"url,omitempty"`
+}
+
+// keepRecords is how many records /status shows.
+const keepRecords = 100
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+// Note records an outcome for /status. The Deployer calls it for each
+// environment it deploys.
+func (s *Server) Note(r Record) {
+	if r.Time.IsZero() {
+		r.Time = s.now()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recent = append(s.recent, r)
+	if len(s.recent) > keepRecords {
+		s.recent = s.recent[len(s.recent)-keepRecords:]
+	}
+}
+
+// Recent are the newest records first.
+func (s *Server) Recent() []Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Record, len(s.recent))
+	for i, r := range s.recent {
+		out[len(s.recent)-1-i] = r
+	}
+	return out
 }
 
 type queue struct {
@@ -83,6 +136,8 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("POST /webhooks/github", s.webhook)
+	// Not public: the ingress exposes only the webhook and the health check.
+	mux.HandleFunc("GET /status", s.status)
 	return mux
 }
 
@@ -224,11 +279,46 @@ func (s *Server) handle(ctx context.Context, t Trigger) {
 	case "failed":
 		log.Info("CI failed; not deploying")
 		s.markHandled(t)
+		s.Note(Record{Repo: t.Repo, SHA: t.SHA, What: "CI", Result: "failed; not deployed"})
+		return
+	}
+	// GitHub keeps what this server did: a commit that already carries one of
+	// this App's deploy checks, finished or recently started, was handled
+	// before (perhaps by the server before a restart) and is not deployed again.
+	if done, why := s.alreadyDeployed(ctx, api, t); done {
+		log.Info("already handled; not deploying again", "why", why)
+		s.markHandled(t)
+		s.Note(Record{Repo: t.Repo, SHA: t.SHA, What: "deploy", Result: "skipped: " + why})
 		return
 	}
 	s.markHandled(t)
 	log.Info("CI passed; deploying")
 	s.Deploy(ctx, api, t)
+}
+
+// abandonedAfter is how long an unfinished deploy check counts as running.
+// Past it, the server that started it is taken to have died mid-deploy.
+const abandonedAfter = time.Hour
+
+func (s *Server) alreadyDeployed(ctx context.Context, api RepoAPI, t Trigger) (bool, string) {
+	checks, err := api.ChecksForCommit(ctx, t.Repo, t.SHA)
+	if err != nil {
+		// Unreadable is not "nothing there": deploying twice is worse than
+		// waiting for the next CI webhook.
+		return true, "could not read the commit's checks: " + err.Error()
+	}
+	for _, c := range checks {
+		if c.App.ID != t.App || !strings.HasPrefix(c.Name, "dray") {
+			continue
+		}
+		if c.Status == "completed" {
+			return true, "check \"" + c.Name + "\" already " + c.Conclusion
+		}
+		if s.now().Sub(c.StartedAt) < abandonedAfter {
+			return true, "check \"" + c.Name + "\" is in progress"
+		}
+	}
+	return false, ""
 }
 
 func (s *Server) markHandled(t Trigger) {
@@ -256,4 +346,27 @@ func verdict(runs []githubapp.Run) string {
 		}
 	}
 	return "green"
+}
+
+// status lists recent outcomes, newest first: as a table, or JSON with
+// ?format=json.
+func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	recs := s.Recent()
+	if r.URL.Query().Get("format") == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(recs)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if len(recs) == 0 {
+		_, _ = fmt.Fprintln(w, "Nothing yet since the server started.")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "TIME (UTC)\tREPO\tCOMMIT\tWHAT\tRESULT\tCHECK")
+	for _, rec := range recs {
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", rec.Time.UTC().Format("2006-01-02 15:04"),
+			rec.Repo, shortSHA(rec.SHA), rec.What, rec.Result, rec.URL)
+	}
+	_ = tw.Flush()
 }

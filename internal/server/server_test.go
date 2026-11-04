@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,11 +26,13 @@ import (
 
 // fakeAPI is one installation's GitHub.
 type fakeAPI struct {
-	mu      sync.Mutex
-	runs    []githubapp.Run
-	tarball map[string][]byte // repo@ref -> tgz
-	checks  map[int64]*githubapp.Check
-	order   []int64
+	mu        sync.Mutex
+	runs      []githubapp.Run
+	existing  []githubapp.CheckRun // checks already on every commit
+	checksErr error
+	tarball   map[string][]byte // repo@ref -> tgz
+	checks    map[int64]*githubapp.Check
+	order     []int64
 }
 
 func (f *fakeAPI) RunsForCommit(_ context.Context, _, sha string) ([]githubapp.Run, error) {
@@ -41,6 +44,12 @@ func (f *fakeAPI) RunsForCommit(_ context.Context, _, sha string) ([]githubapp.R
 		out[i] = r
 	}
 	return out, nil
+}
+
+func (f *fakeAPI) ChecksForCommit(context.Context, string, string) ([]githubapp.CheckRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.existing, f.checksErr
 }
 
 func (f *fakeAPI) Tarball(_ context.Context, repo, ref string, w io.Writer) error {
@@ -338,5 +347,70 @@ func TestEachAppChecksItsOwnSecret(t *testing.T) {
 	s.Wait()
 	if got["b1"] != 2 || got["a1"] != 1 || len(got) != 2 {
 		t.Errorf("deployed with %v", got)
+	}
+}
+
+func check(app int64, name, status, conclusion string, started time.Time) githubapp.CheckRun {
+	c := githubapp.CheckRun{Name: name, Status: status, Conclusion: conclusion, StartedAt: started}
+	c.App.ID = app
+	return c
+}
+
+func TestAlreadyDeployedCommitsAreSkipped(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cases := map[string]struct {
+		existing []githubapp.CheckRun
+		err      error
+		deploys  bool
+	}{
+		"nothing there":               {deploys: true},
+		"our check, finished":         {existing: []githubapp.CheckRun{check(7, "dray: shop → prod", "completed", "success", now.Add(-time.Hour))}},
+		"our check, failed":           {existing: []githubapp.CheckRun{check(7, "dray: shop → prod", "completed", "failure", now.Add(-time.Hour))}},
+		"our check, running":          {existing: []githubapp.CheckRun{check(7, "dray: shop → prod", "in_progress", "", now.Add(-10*time.Minute))}},
+		"our check, abandoned":        {existing: []githubapp.CheckRun{check(7, "dray: shop → prod", "in_progress", "", now.Add(-2*time.Hour))}, deploys: true},
+		"another App's dray check":    {existing: []githubapp.CheckRun{check(9, "dray: shop → prod", "completed", "success", now)}, deploys: true},
+		"our App, not a deploy check": {existing: []githubapp.CheckRun{check(7, "lint", "completed", "success", now)}, deploys: true},
+		"checks unreadable":           {err: errors.New("502 Bad Gateway")},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			api := &fakeAPI{runs: []githubapp.Run{{Status: "completed", Conclusion: "success"}}, existing: tc.existing, checksErr: tc.err}
+			deployed := false
+			s := &Server{Apps: map[int64]App{7: {ID: 7, GitHub: oneInstallation{api}}}, Now: func() time.Time { return now },
+				Deploy: func(context.Context, RepoAPI, Trigger) { deployed = true }}
+			s.Enqueue(Trigger{Repo: "o/shop", SHA: "a1", App: 7, Installation: 1})
+			s.Wait()
+			if deployed != tc.deploys {
+				t.Errorf("deployed = %v, want %v; status %+v", deployed, tc.deploys, s.Recent())
+			}
+			if !tc.deploys && (len(s.Recent()) != 1 || !strings.HasPrefix(s.Recent()[0].Result, "skipped")) {
+				t.Errorf("a skip was not recorded: %+v", s.Recent())
+			}
+		})
+	}
+}
+
+func TestStatusPage(t *testing.T) {
+	s := &Server{Now: func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/status", nil))
+	if !strings.Contains(rec.Body.String(), "Nothing yet") {
+		t.Errorf("empty: %q", rec.Body)
+	}
+	for i := range keepRecords + 5 {
+		s.Note(Record{Repo: "o/shop", SHA: fmt.Sprintf("sha%05d", i), What: "shop → prod", Result: "success: Deployed"})
+	}
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/status", nil))
+	body := rec.Body.String()
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) != keepRecords+1 || !strings.Contains(lines[1], "sha0010") || !strings.HasPrefix(lines[0], "TIME (UTC)") {
+		t.Errorf("want the newest %d first, got %d lines:\n%s", keepRecords, len(lines), strings.Join(lines[:3], "\n"))
+	}
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/status?format=json", nil))
+	var recs []Record
+	if err := json.Unmarshal(rec.Body.Bytes(), &recs); err != nil || len(recs) != keepRecords || recs[0].SHA != "sha00104" {
+		t.Errorf("json: %v %d", err, len(recs))
 	}
 }
