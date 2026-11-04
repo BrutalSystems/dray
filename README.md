@@ -171,10 +171,19 @@ manage GitHub Apps (GitHub's manifest flow makes it one click), store its ID,
 private key and webhook secret in your secret store, and install it only on
 the repos Dray deploys.
 
-Settings: `DRAY_GITHUB_APP_ID`, `DRAY_GITHUB_APP_KEY_FILE`,
-`DRAY_WEBHOOK_SECRET_FILE`, and optionally `DRAY_BUILD_MEMORY` and
-`DRAY_BUILD_CPU` (default 6Gi, 2). AWS, Kubernetes and the secret store use
-the pod's own identity.
+A GitHub App private to an organization can only be installed there, so a
+server that deploys repos of several organizations has one App per
+organization, all sending to the same address. Each webhook is checked with
+the secret of the App that sent it.
+
+The server reads its Apps from the vault, signing in with its Kubernetes
+service account (`DRAY_VAULT_ROLE`; each App's path in `DRAY_GITHUB_APPS`
+holds `app_id`, `private_key` and `webhook_secret`), or one App from files
+(`DRAY_GITHUB_APP_ID`, `DRAY_GITHUB_APP_KEY_FILE`, `DRAY_WEBHOOK_SECRET_FILE`).
+Each deploy reads its app's secrets as that app's own vault role
+(`DRAY_VAULT_APP_ROLE`, default `kv-{client}-{app}-{env}`), so it can read
+nothing else. Builds: `DRAY_BUILD_MEMORY` and `DRAY_BUILD_CPU` (default 6Gi,
+2). AWS and Kubernetes use the pod's own identity.
 
 ## License
 

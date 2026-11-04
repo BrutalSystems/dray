@@ -113,7 +113,7 @@ func TestWebhookTriggersOnlyGreenPushesToMain(t *testing.T) {
 	api := &fakeAPI{runs: []githubapp.Run{{Name: "ci", Status: "completed", Conclusion: "success"}}}
 	var mu sync.Mutex
 	var deployed []string
-	s := &Server{WebhookSecret: secret, GitHub: oneInstallation{api}, Deploy: func(_ context.Context, _ RepoAPI, tr Trigger) {
+	s := &Server{Apps: map[int64]App{42: {ID: 42, WebhookSecret: secret, GitHub: oneInstallation{api}}}, Deploy: func(_ context.Context, _ RepoAPI, tr Trigger) {
 		mu.Lock()
 		deployed = append(deployed, tr.SHA)
 		mu.Unlock()
@@ -158,7 +158,7 @@ func TestQueueDeploysTheLatest(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
 	var deployed []string
-	s := &Server{GitHub: oneInstallation{api}, Deploy: func(_ context.Context, _ RepoAPI, tr Trigger) {
+	s := &Server{Apps: map[int64]App{0: {GitHub: oneInstallation{api}}}, Deploy: func(_ context.Context, _ RepoAPI, tr Trigger) {
 		if tr.SHA == "first" {
 			<-release
 		}
@@ -290,5 +290,53 @@ func TestDeployerReportsADownloadFailure(t *testing.T) {
 	}
 	if k := api.check(t, "dray"); k.Conclusion != "failure" || !strings.Contains(k.Summary, "404") {
 		t.Errorf("%+v", k)
+	}
+}
+
+func TestEachAppChecksItsOwnSecret(t *testing.T) {
+	apiA, apiB := &fakeAPI{runs: []githubapp.Run{{Status: "completed", Conclusion: "success"}}}, &fakeAPI{runs: []githubapp.Run{{Status: "completed", Conclusion: "success"}}}
+	var mu sync.Mutex
+	got := map[string]int64{}
+	s := &Server{Apps: map[int64]App{
+		1: {ID: 1, WebhookSecret: []byte("secret-a"), GitHub: oneInstallation{apiA}},
+		2: {ID: 2, WebhookSecret: []byte("secret-b"), GitHub: oneInstallation{apiB}},
+	}, Deploy: func(_ context.Context, api RepoAPI, tr Trigger) {
+		mu.Lock()
+		defer mu.Unlock()
+		if api == RepoAPI(apiB) {
+			got[tr.SHA] = 2
+		} else {
+			got[tr.SHA] = 1
+		}
+	}}
+	h := s.Handler()
+	send := func(target, secret string, sha string) int {
+		body := event("main", sha, "push")
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+		req.Header.Set("X-GitHub-Event", "workflow_run")
+		req.Header.Set("X-Hub-Signature-256", sign([]byte(secret), body))
+		if target != "" {
+			req.Header.Set("X-GitHub-Hook-Installation-Target-ID", target)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := send("2", "secret-b", "b1"); code != http.StatusAccepted {
+		t.Errorf("App 2 with its secret: %d", code)
+	}
+	s.Wait() // one repo deploys the latest commit; let this one finish first
+	if code := send("2", "secret-a", "b2"); code != http.StatusUnauthorized {
+		t.Errorf("App 2 signed with App 1's secret was accepted: %d", code)
+	}
+	if code := send("9", "secret-a", "b3"); code != http.StatusUnauthorized {
+		t.Errorf("an unknown App was accepted: %d", code)
+	}
+	if code := send("", "secret-a", "a1"); code != http.StatusAccepted {
+		t.Errorf("no target header, App 1's secret: %d", code)
+	}
+	s.Wait()
+	if got["b1"] != 2 || got["a1"] != 1 || len(got) != 2 {
+		t.Errorf("deployed with %v", got)
 	}
 }

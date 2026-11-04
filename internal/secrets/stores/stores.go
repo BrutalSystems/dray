@@ -3,6 +3,7 @@
 package stores
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +44,17 @@ type FileConfig struct {
 
 // Open returns the configured store. env is the environment being worked
 // on, for layouts that keep secrets per environment; it may be empty.
+// OpenBao's token comes from the person's own sign-in (EnvToken).
 func Open(c Config, env string) (secrets.Store, error) {
+	return OpenWithToken(c, env, nil)
+}
+
+// OpenWithToken is Open with OpenBao's token from token instead of the
+// person's sign-in, such as a server's Kubernetes login. nil is EnvToken.
+func OpenWithToken(c Config, env string, token func(context.Context) (string, error)) (secrets.Store, error) {
+	if token == nil {
+		token = openbao.EnvToken
+	}
 	switch c.Type {
 	case "openbao":
 		oc := OpenBaoConfig{}
@@ -56,7 +67,7 @@ func Open(c Config, env string) (secrets.Store, error) {
 		return openbao.New(openbao.Config{
 			Address: oc.Address, Mount: oc.Mount, Namespace: oc.Namespace,
 			Layout: openbao.Layout{Template: oc.Layout, Clients: oc.Clients, Env: env},
-			Token:  openbao.EnvToken,
+			Token:  token,
 		})
 	case "file":
 		if c.File == nil || c.File.Dir == "" {

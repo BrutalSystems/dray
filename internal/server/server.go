@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/BrutalSystems/dray/internal/githubapp"
@@ -30,18 +31,29 @@ type GitHub interface {
 	Installation(id int64) RepoAPI
 }
 
+// App is one GitHub App the server answers for. A private App can be
+// installed only in the organization that owns it, so a server deploying
+// repos of several organizations has one App per organization, all sending
+// to the same address.
+type App struct {
+	ID int64
+	// WebhookSecret checks the signature of the App's webhooks.
+	WebhookSecret []byte
+	GitHub        GitHub
+}
+
 // Trigger is a commit on a repo's default branch whose CI finished.
 type Trigger struct {
 	Repo         string // owner/name
 	SHA          string
+	App          int64
 	Installation int64
 }
 
 // Server receives webhooks and runs deploys.
 type Server struct {
-	// WebhookSecret checks every webhook's signature.
-	WebhookSecret []byte
-	GitHub        GitHub
+	// Apps are the GitHub Apps whose webhooks are accepted, by App ID.
+	Apps map[int64]App
 	// Deploy handles one trigger after its CI passed.
 	Deploy func(ctx context.Context, api RepoAPI, t Trigger)
 	Log    *slog.Logger
@@ -90,13 +102,31 @@ type workflowRunEvent struct {
 	} `json:"installation"`
 }
 
+// verify finds the App a webhook came from and checks its signature with
+// that App's secret. GitHub names the App in X-GitHub-Hook-Installation-
+// Target-ID; without it, each App's secret is tried.
+func (s *Server) verify(r *http.Request, body []byte) (int64, bool) {
+	sig := r.Header.Get("X-Hub-Signature-256")
+	if id, err := strconv.ParseInt(r.Header.Get("X-GitHub-Hook-Installation-Target-ID"), 10, 64); err == nil {
+		a, ok := s.Apps[id]
+		return id, ok && githubapp.VerifySignature(a.WebhookSecret, body, sig)
+	}
+	for id, a := range s.Apps {
+		if githubapp.VerifySignature(a.WebhookSecret, body, sig) {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 25<<20))
 	if err != nil {
 		http.Error(w, "reading the body", http.StatusBadRequest)
 		return
 	}
-	if !githubapp.VerifySignature(s.WebhookSecret, body, r.Header.Get("X-Hub-Signature-256")) {
+	app, ok := s.verify(r, body)
+	if !ok {
 		s.log().Warn("webhook with a bad signature refused", "delivery", r.Header.Get("X-GitHub-Delivery"))
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
@@ -123,7 +153,7 @@ func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	s.Enqueue(Trigger{Repo: ev.Repository.FullName, SHA: run.HeadSHA, Installation: ev.Installation.ID})
+	s.Enqueue(Trigger{Repo: ev.Repository.FullName, SHA: run.HeadSHA, App: app, Installation: ev.Installation.ID})
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -176,7 +206,12 @@ func (s *Server) Wait() { s.wg.Wait() }
 // still going means another webhook will come; a failed one means no deploy.
 func (s *Server) handle(ctx context.Context, t Trigger) {
 	log := s.log().With("repo", t.Repo, "sha", t.SHA)
-	api := s.GitHub.Installation(t.Installation)
+	app, ok := s.Apps[t.App]
+	if !ok {
+		log.Error("no such App", "app", t.App)
+		return
+	}
+	api := app.GitHub.Installation(t.Installation)
 	runs, err := api.RunsForCommit(ctx, t.Repo, t.SHA)
 	if err != nil {
 		log.Error("cannot read CI runs; not deploying", "err", err)
