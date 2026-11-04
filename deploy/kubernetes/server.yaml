@@ -1,0 +1,63 @@
+# dray-server's identity in the cluster: its service account, and what it may
+# do in its own namespace (start and remove build pods). It can change nothing
+# in an app's namespace until that namespace grants it deployer.yaml.
+#
+#   kubectl apply -f deploy/kubernetes/server.yaml
+#   kubectl -n dray annotate serviceaccount dray-server \
+#     eks.amazonaws.com/role-arn=<the role deploy/aws/apply-role.sh prints>
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dray-server
+  namespace: dray
+  labels:
+    app.kubernetes.io/name: dray-server
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dray-server-builds
+  namespace: dray
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dray-server-builds
+  namespace: dray
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dray-server-builds
+subjects:
+  - kind: ServiceAccount
+    name: dray-server
+    namespace: dray
+---
+# Reading namespaces lets Dray check who owns one (the dray/app label). It
+# cannot create or label namespaces: a person creates an app's namespace and
+# grants deployer.yaml there.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dray-server-namespaces
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dray-server-namespaces
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dray-server-namespaces
+subjects:
+  - kind: ServiceAccount
+    name: dray-server
+    namespace: dray

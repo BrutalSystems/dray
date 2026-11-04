@@ -1,0 +1,43 @@
+# Lets dray-server deploy into one app namespace: apply the app's manifests
+# and secrets server-side, watch and restart rollouts, undo a failed one.
+# Nothing is deleted (server-side apply never prunes). Grant it per namespace:
+#
+#   sed 's/APP_NAMESPACE/<namespace>/' deploy/kubernetes/deployer.yaml | kubectl apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dray-deployer
+  namespace: APP_NAMESPACE
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services, serviceaccounts]
+    verbs: [get, list, create, update, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list, create, update, patch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dray-deployer
+  namespace: APP_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dray-deployer
+subjects:
+  - kind: ServiceAccount
+    name: dray-server
+    namespace: dray
